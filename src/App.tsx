@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Project, ReceiptImage, PlatformMetrics, ActivityLog, TrainingJob } from './types';
 import { isSupabaseConfigured } from './lib/supabaseClient';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { LoginPage } from './components/LoginPage';
+import { Sidebar } from './components/Sidebar';
 import { Navbar } from './components/Navbar';
 import { Dashboard } from './components/Dashboard';
 import { UploadView } from './components/UploadView';
@@ -11,7 +14,8 @@ import { TrainingStudio } from './components/TrainingStudio';
 import { ApiDocsView } from './components/ApiDocsView';
 import { ProjectModal } from './components/ProjectModal';
 
-export default function App() {
+function MainAppContent() {
+  const { user, loading } = useAuth();
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
 
@@ -66,8 +70,23 @@ export default function App() {
   };
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    if (user) {
+      fetchData();
+    }
+  }, [user]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center font-mono">
+        <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+        <p className="text-xs uppercase tracking-widest text-slate-400">Loading Supabase Auth Session...</p>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginPage />;
+  }
 
   // Filter images for active project
   const currentProjectImages = images.filter(
@@ -185,12 +204,11 @@ export default function App() {
   };
 
   return (
-    <div className={`min-h-screen font-sans transition-colors duration-200 ${
+    <div className={`min-h-screen flex font-sans transition-colors duration-200 ${
       isDarkMode ? 'bg-slate-950 text-slate-100 dark' : 'bg-slate-50 text-slate-900'
     }`}>
-      
-      {/* Top Navbar */}
-      <Navbar
+      {/* Enterprise Sidebar Navigation */}
+      <Sidebar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         projects={projects}
@@ -198,78 +216,94 @@ export default function App() {
         setActiveProject={setActiveProject}
         onOpenNewProjectModal={() => setIsProjectModalOpen(true)}
         pendingReviewsCount={currentProjectImages.filter(i => i.status === 'needs_review').length}
-        isDarkMode={isDarkMode}
-        setIsDarkMode={setIsDarkMode}
-        isSupabaseConfigured={isSupabaseConfigured()}
       />
 
-      {/* Main View Container */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {activeTab === 'dashboard' && (
-          <Dashboard
-            metrics={metrics}
-            activityLogs={activityLogs}
-            activeProject={activeProject}
-            images={currentProjectImages}
-            onNavigateTab={setActiveTab}
-            onTrainModel={handleRunTraining}
-            isDarkMode={isDarkMode}
-          />
-        )}
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Top Navbar */}
+        <Navbar
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          projects={projects}
+          activeProject={activeProject}
+          setActiveProject={setActiveProject}
+          onOpenNewProjectModal={() => setIsProjectModalOpen(true)}
+          pendingReviewsCount={currentProjectImages.filter(i => i.status === 'needs_review').length}
+          isDarkMode={isDarkMode}
+          setIsDarkMode={setIsDarkMode}
+          isSupabaseConfigured={isSupabaseConfigured()}
+        />
 
-        {activeTab === 'upload' && (
-          <UploadView
-            activeProject={activeProject}
-            onUploadSuccess={handleUploadSuccess}
-            isDarkMode={isDarkMode}
-          />
-        )}
+        {/* Main View Container */}
+        <main className="flex-1 p-6 overflow-y-auto">
+          {activeTab === 'dashboard' && (
+            <Dashboard
+              metrics={metrics}
+              activityLogs={activityLogs}
+              activeProject={activeProject}
+              projects={projects}
+              images={currentProjectImages}
+              onNavigateTab={setActiveTab}
+              onTrainModel={handleRunTraining}
+              onOpenNewProjectModal={() => setIsProjectModalOpen(true)}
+              isDarkMode={isDarkMode}
+            />
+          )}
 
-        {activeTab === 'annotate' && (
-          <AnnotationWorkspace
-            images={currentProjectImages}
-            selectedImage={selectedImage}
-            setSelectedImage={setSelectedImage}
-            onSaveLabels={handleSaveLabels}
-            onTrainTrigger={handleRunTraining}
-            isDarkMode={isDarkMode}
-          />
-        )}
+          {activeTab === 'upload' && (
+            <UploadView
+              activeProject={activeProject}
+              onUploadSuccess={handleUploadSuccess}
+              isDarkMode={isDarkMode}
+            />
+          )}
 
-        {activeTab === 'review-queue' && (
-          <ReviewQueue
-            images={currentProjectImages}
-            onSelectForAnnotation={(img) => {
-              setSelectedImage(img);
-              setActiveTab('annotate');
-            }}
-            isDarkMode={isDarkMode}
-          />
-        )}
+          {activeTab === 'annotate' && (
+            <AnnotationWorkspace
+              images={currentProjectImages}
+              selectedImage={selectedImage}
+              setSelectedImage={setSelectedImage}
+              onSaveLabels={handleSaveLabels}
+              onTrainTrigger={handleRunTraining}
+              isDarkMode={isDarkMode}
+            />
+          )}
 
-        {activeTab === 'dataset' && (
-          <DatasetManager
-            images={currentProjectImages}
-            activeProject={activeProject}
-            onExport={handleExportDataset}
-            isDarkMode={isDarkMode}
-          />
-        )}
+          {activeTab === 'review-queue' && (
+            <ReviewQueue
+              images={currentProjectImages}
+              onSelectForAnnotation={(img) => {
+                setSelectedImage(img);
+                setActiveTab('annotate');
+              }}
+              isDarkMode={isDarkMode}
+            />
+          )}
 
-        {activeTab === 'training' && (
-          <TrainingStudio
-            activeProject={activeProject}
-            onRunTraining={handleRunTraining}
-            isTraining={isTraining}
-            trainingJob={trainingJob}
-            isDarkMode={isDarkMode}
-          />
-        )}
+          {activeTab === 'dataset' && (
+            <DatasetManager
+              images={currentProjectImages}
+              activeProject={activeProject}
+              onExport={handleExportDataset}
+              isDarkMode={isDarkMode}
+            />
+          )}
 
-        {activeTab === 'api-docs' && (
-          <ApiDocsView isDarkMode={isDarkMode} />
-        )}
-      </main>
+          {activeTab === 'training' && (
+            <TrainingStudio
+              activeProject={activeProject}
+              onRunTraining={handleRunTraining}
+              isTraining={isTraining}
+              trainingJob={trainingJob}
+              isDarkMode={isDarkMode}
+            />
+          )}
+
+          {activeTab === 'api-docs' && (
+            <ApiDocsView isDarkMode={isDarkMode} />
+          )}
+        </main>
+      </div>
 
       {/* New Project Modal */}
       <ProjectModal
@@ -278,7 +312,15 @@ export default function App() {
         onCreateProject={handleCreateProject}
         isDarkMode={isDarkMode}
       />
-
     </div>
   );
 }
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <MainAppContent />
+    </AuthProvider>
+  );
+}
+

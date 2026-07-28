@@ -1,5 +1,6 @@
 import React from 'react';
 import { PlatformMetrics, ActivityLog, Project, ReceiptImage } from '../types';
+import { useAuth } from '../context/AuthContext';
 import { 
   FolderKanban, 
   FileText, 
@@ -15,16 +16,21 @@ import {
   Zap,
   Sparkles,
   TrendingUp,
-  Terminal
+  Terminal,
+  UserCheck,
+  Plus,
+  FolderOpen
 } from 'lucide-react';
 
 interface DashboardProps {
   metrics: PlatformMetrics | null;
   activityLogs: ActivityLog[];
   activeProject: Project | null;
+  projects: Project[];
   images: ReceiptImage[];
   onNavigateTab: (tab: string) => void;
   onTrainModel: () => void;
+  onOpenNewProjectModal: () => void;
   isDarkMode: boolean;
 }
 
@@ -32,16 +38,86 @@ export const Dashboard: React.FC<DashboardProps> = ({
   metrics,
   activityLogs,
   activeProject,
+  projects,
   images,
   onNavigateTab,
   onTrainModel,
+  onOpenNewProjectModal,
   isDarkMode
 }) => {
+  const { user } = useAuth();
   const trainedSamplesCount = activeProject?.trainedSampleCount || 0;
   const canTrain = trainedSamplesCount >= 3;
 
   return (
     <div className="space-y-6">
+      
+      {/* Welcome Email Banner */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 rounded bg-slate-900 border border-slate-800 text-slate-100 gap-4">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+            <UserCheck className="w-5 h-5" />
+          </div>
+          <div>
+            <h2 className="text-sm font-bold uppercase tracking-wider text-white">
+              Welcome back, <span className="text-emerald-400 font-mono">{user?.email || 'operator@atm-ai.internal'}</span>
+            </h2>
+            <p className="text-xs text-slate-400">
+              Supabase Auth Session Active • Phase 1 Core Infrastructure & Multi-Tenant SQL Schema
+            </p>
+          </div>
+        </div>
+
+        <button
+          onClick={onOpenNewProjectModal}
+          className="px-3.5 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs uppercase tracking-wider transition-colors flex items-center gap-1.5 cursor-pointer shadow-md shrink-0"
+        >
+          <Plus className="w-4 h-4" />
+          <span>Create New Project</span>
+        </button>
+      </div>
+
+      {/* Projects OCR Supabase Table Summary Card */}
+      <div className={`p-5 rounded border ${
+        isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
+      } space-y-4`}>
+        <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+          <div className="flex items-center gap-2">
+            <FolderKanban className="w-4 h-4 text-indigo-500" />
+            <h2 className="text-xs font-bold uppercase tracking-wider">
+              Supabase Projects (<code className="text-indigo-400 font-mono">projects_ocr</code> Table)
+            </h2>
+          </div>
+          <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+            {projects.length} Active Projects
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {projects.map((proj) => (
+            <div
+              key={proj.id}
+              className={`p-4 rounded border text-xs space-y-2 transition-all ${
+                activeProject?.id === proj.id
+                  ? 'bg-indigo-950/40 border-indigo-500/50 text-indigo-200 ring-1 ring-indigo-500/30'
+                  : 'bg-slate-800/40 border-slate-700/60 text-slate-300 hover:bg-slate-800'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-extrabold uppercase text-white truncate max-w-[180px]">{proj.name}</span>
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-slate-900 text-slate-400 uppercase">
+                  {proj.receiptType || 'ATM'}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 line-clamp-2">{proj.description}</p>
+              <div className="flex items-center justify-between pt-2 border-t border-slate-700/40 text-[10px] font-mono text-slate-400">
+                <span>Accuracy: <strong className="text-emerald-400">{proj.modelAccuracy}%</strong></span>
+                <span>Samples: <strong className="text-indigo-300">{proj.trainedSampleCount}</strong></span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
       
       {/* Top Banner: Instant Learning Readiness */}
       <div className="relative overflow-hidden rounded bg-slate-900 border border-slate-800 p-6 text-white shadow-xl">

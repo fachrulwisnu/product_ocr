@@ -28,10 +28,43 @@ export const UploadView: React.FC<UploadViewProps> = ({
 }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [progress, setProgress] = useState(0);
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState<string>('');
   const [selectedModel, setSelectedModel] = useState<string>('nvidia/nemotron-3-ultra-550b-a55b');
+
+  React.useEffect(() => {
+    if (!isProcessing) {
+      setProgress(0);
+      setStatusMessage('');
+      return;
+    }
+
+    setProgress(20);
+    setStatusMessage("Compressing & optimizing image payload...");
+
+    const t1 = setTimeout(() => {
+      setProgress(40);
+      setStatusMessage("Sending secure request to NVIDIA VLM / OCR endpoint...");
+    }, 1000);
+
+    const t2 = setTimeout(() => {
+      setProgress(70);
+      setStatusMessage("Running text extraction & applying Golden Templates...");
+    }, 2500);
+
+    const t3 = setTimeout(() => {
+      setProgress(90);
+      setStatusMessage("Synthesizing Instant Learning context from Dataset Manager...");
+    }, 4500);
+
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+    };
+  }, [isProcessing]);
 
   const handleFileUpload = async (files: FileList | null) => {
     if (!files || files.length === 0 || !activeProject) return;
@@ -43,7 +76,6 @@ export const UploadView: React.FC<UploadViewProps> = ({
 
     setIsProcessing(true);
     setErrorMessage(null);
-    setStatusMessage(`Invoking NVIDIA VLM (${selectedModel.split('/')[1] || selectedModel}) & Extracting Key-Value Pairs...`);
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
@@ -56,7 +88,6 @@ export const UploadView: React.FC<UploadViewProps> = ({
         });
 
         // Compress image to max 1024px JPEG at 0.8 quality
-        setStatusMessage(`Compressing & Sending ${file.name} to ${selectedModel.includes('ocr') ? 'Nemotron OCR v2' : selectedModel.includes('llama') ? 'Llama 3.2 90B' : 'Nemotron 3'}...`);
         const compressedImageData = await compressImageForVlm(rawBase64, 1024, 0.8);
 
         const response = await fetch('/api/upload', {
@@ -73,6 +104,9 @@ export const UploadView: React.FC<UploadViewProps> = ({
 
         if (response.ok) {
           const data = await response.json();
+          setProgress(100);
+          setStatusMessage("Finalizing structured JSON output...");
+          await new Promise(r => setTimeout(r, 400));
           onUploadSuccess(data);
         } else {
           const errData = await response.json().catch(() => ({ message: 'VLM API request failed or timed out' }));
@@ -86,6 +120,7 @@ export const UploadView: React.FC<UploadViewProps> = ({
     }
 
     setIsProcessing(false);
+    setProgress(0);
     setStatusMessage('');
   };
 
@@ -98,7 +133,6 @@ export const UploadView: React.FC<UploadViewProps> = ({
     }
 
     setIsProcessing(true);
-    setStatusMessage(`Running NVIDIA VLM (${selectedModel.includes('ocr') ? 'Nemotron OCR v2' : selectedModel.includes('llama') ? 'Llama 3.2 90B' : 'Nemotron 3'}) for ${actualCategory}...`);
 
     const imageData = generateReceiptSVG(
       'FIRST NATIONAL BANK',
@@ -125,12 +159,16 @@ export const UploadView: React.FC<UploadViewProps> = ({
 
       if (response.ok) {
         const data = await response.json();
+        setProgress(100);
+        setStatusMessage("Finalizing structured JSON output...");
+        await new Promise(r => setTimeout(r, 400));
         onUploadSuccess(data);
       }
     } catch (err) {
       console.error('Preset upload error:', err);
     } finally {
       setIsProcessing(false);
+      setProgress(0);
       setStatusMessage('');
     }
   };
@@ -243,62 +281,77 @@ export const UploadView: React.FC<UploadViewProps> = ({
           disabled={!selectedType || isProcessing}
         />
 
-        <div className="space-y-4 max-w-md mx-auto pointer-events-none">
-          <div className={`w-16 h-16 rounded border mx-auto flex items-center justify-center transition-colors ${
-            !selectedType
-              ? 'bg-amber-500/10 border-amber-500/20 text-amber-500'
-              : 'bg-indigo-500/10 border-indigo-500/20 text-indigo-500'
-          }`}>
-            {isProcessing ? (
-              <Loader2 className="w-8 h-8 animate-spin" />
-            ) : !selectedType ? (
-              <AlertCircle className="w-8 h-8 text-amber-500" />
+        {isProcessing ? (
+          <div className="flex flex-col items-center justify-center py-8 px-4 text-center pointer-events-none">
+            {/* Animated Spinner or Icon */}
+            <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+            
+            <h3 className="text-slate-900 dark:text-white font-semibold text-lg mb-1">PROCESSING WITH NVIDIA VLM API...</h3>
+            <p className="text-slate-500 dark:text-gray-400 text-sm mb-4">Supports PNG, JPG, JPEG, or scanned PDF documents up to 25MB</p>
+
+            {/* Live Progress Bar Container */}
+            <div className="w-full max-w-md bg-slate-200 dark:bg-gray-800 rounded-full h-3 mb-3 overflow-hidden border border-slate-300 dark:border-gray-700">
+              <div 
+                className="bg-blue-500 h-full transition-all duration-500 ease-out"
+                style={{ width: `${progress}%` }}
+              ></div>
+            </div>
+
+            {/* Live Status Log Badge */}
+            <div className="inline-flex items-center px-4 py-2 bg-blue-950/80 border border-blue-500/30 rounded-lg text-blue-300 text-xs font-mono shadow-inner">
+              <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse mr-2"></span>
+              {statusMessage || 'Processing...'} ({progress}%)
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4 max-w-md mx-auto pointer-events-none">
+            <div className={`w-16 h-16 rounded border mx-auto flex items-center justify-center transition-colors ${
+              !selectedType
+                ? 'bg-amber-500/10 border-amber-500/20 text-amber-500'
+                : 'bg-indigo-500/10 border-indigo-500/20 text-indigo-500'
+            }`}>
+              {!selectedType ? (
+                <AlertCircle className="w-8 h-8 text-amber-500" />
+              ) : (
+                <Upload className="w-8 h-8" />
+              )}
+            </div>
+
+            <div>
+              <h3 className={`font-bold text-sm uppercase tracking-wide ${
+                !selectedType ? 'text-amber-600 dark:text-amber-400 font-extrabold' : ''
+              }`}>
+                {!selectedType 
+                  ? '⚠️ PLEASE SELECT A DOCUMENT CATEGORY FIRST' 
+                  : `Drag & Drop ${selectedType} Images`}
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                {!selectedType
+                  ? 'Select a bank or document category above to unlock file ingestion'
+                  : 'Supports PNG, JPG, JPEG, or scanned PDF documents up to 25MB'}
+              </p>
+            </div>
+
+            {errorMessage ? (
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded text-xs bg-rose-500/10 text-rose-600 dark:text-rose-400 font-mono font-bold uppercase tracking-wider">
+                <AlertCircle className="w-4 h-4" />
+                {errorMessage}
+              </div>
             ) : (
-              <Upload className="w-8 h-8" />
+              <button
+                disabled={!selectedType}
+                className={`px-4 py-2 rounded text-xs font-bold uppercase tracking-wider shadow-md inline-flex items-center gap-2 transition-all ${
+                  !selectedType
+                    ? 'bg-slate-300 dark:bg-slate-800 text-slate-500 cursor-not-allowed opacity-50'
+                    : 'bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer'
+                }`}
+              >
+                <FolderOpen className="w-4 h-4" />
+                {!selectedType ? '⚠️ Select Category First' : 'Browse Local Files'}
+              </button>
             )}
           </div>
-
-          <div>
-            <h3 className={`font-bold text-sm uppercase tracking-wide ${
-              !selectedType ? 'text-amber-600 dark:text-amber-400 font-extrabold' : ''
-            }`}>
-              {isProcessing 
-                ? 'Processing with NVIDIA VLM API...' 
-                : !selectedType 
-                ? '⚠️ PLEASE SELECT A DOCUMENT CATEGORY FIRST' 
-                : `Drag & Drop ${selectedType} Images`}
-            </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              {!selectedType
-                ? 'Select a bank or document category above to unlock file ingestion'
-                : 'Supports PNG, JPG, JPEG, or scanned PDF documents up to 25MB'}
-            </p>
-          </div>
-
-          {errorMessage ? (
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded text-xs bg-rose-500/10 text-rose-600 dark:text-rose-400 font-mono font-bold uppercase tracking-wider">
-              <AlertCircle className="w-4 h-4" />
-              {errorMessage}
-            </div>
-          ) : statusMessage ? (
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded text-xs bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-mono font-bold uppercase tracking-wider">
-              <Sparkles className="w-4 h-4 animate-spin" />
-              {statusMessage}
-            </div>
-          ) : (
-            <button
-              disabled={!selectedType || isProcessing}
-              className={`px-4 py-2 rounded text-xs font-bold uppercase tracking-wider shadow-md inline-flex items-center gap-2 transition-all ${
-                !selectedType
-                  ? 'bg-slate-300 dark:bg-slate-800 text-slate-500 cursor-not-allowed opacity-50'
-                  : 'bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer'
-              }`}
-            >
-              <FolderOpen className="w-4 h-4" />
-              {!selectedType ? '⚠️ Select Category First' : 'Browse Local Files'}
-            </button>
-          )}
-        </div>
+        )}
       </div>
 
       {/* Preset ATM Receipt Quick Sample Ingestor */}

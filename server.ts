@@ -1,18 +1,32 @@
 import express from 'express';
 import path from 'path';
+import cors from 'cors';
+import helmet from 'helmet';
+import morgan from 'morgan';
 import { randomUUID } from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import { invokeNvidiaVlm, convertVlmJsonToFields, HARDCODED_NVIDIA_API_KEY, extractReceiptData } from './src/lib/nvidiaVlm';
 import { predictFieldsFromOCR, runInstantLearningTraining } from './src/lib/extractionEngine';
 import { INITIAL_PROJECTS, INITIAL_RECEIPT_IMAGES, generateReceiptSVG } from './src/data/sampleReceipts';
 import { Project, ReceiptImage, ActivityLog, PlatformMetrics, TrainingJob } from './src/types';
+import { apiRateLimiter } from './src/middleware/rateLimiter';
+import { errorHandler } from './src/middleware/errorHandler';
+import projectsV1Router from './src/routes/v1/projects.route';
 
 const app = express();
 const PORT = 3000;
 
+// Security & Logging Middlewares
+app.use(helmet({ contentSecurityPolicy: false })); // Disable CSP strict for Vite inline scripts in dev
+app.use(cors());
+app.use(morgan('dev'));
+app.use('/api', apiRateLimiter);
 
 // Enable JSON body parser with increased limit for image base64 uploads
 app.use(express.json({ limit: '50mb' }));
+
+// Mount V1 API Routes
+app.use('/api/v1/projects', projectsV1Router);
 
 // In-Memory Data Store (Initialized with pre-loaded ATM receipts)
 let projectsStore: Project[] = [...INITIAL_PROJECTS];
@@ -493,6 +507,9 @@ app.post('/api/export', (req, res) => {
   });
 });
 
+
+// Global Express Error Handler Middleware
+app.use(errorHandler);
 
 // ----------------------------------------------------
 // VITE MIDDLEWARE / STATIC SERVING
