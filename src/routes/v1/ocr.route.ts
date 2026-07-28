@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { AuthenticatedRequest, verifyAuthToken } from '../../middleware/authMiddleware';
 import { supabase, isSupabaseConfigured } from '../../lib/supabaseClient';
 import { processNvidiaNemotronOcr, OcrDetectedBlock } from '../../lib/nvidiaNemotronOcr';
+import { getActiveTemplatesStore } from './templates.route';
 
 const router = Router();
 
@@ -59,6 +60,19 @@ router.post(
       // 2. Call NVIDIA Nemotron OCR v2 API service
       const ocrResult = await processNvidiaNemotronOcr(base64Image, `image_${imageId}.jpg`);
 
+      // Detect template matching keywords
+      let detectedTemplate = "General Receipt";
+      const upperText = (ocrResult.raw_text || '').toUpperCase();
+      const templates = getActiveTemplatesStore();
+      for (const tmpl of templates) {
+        if (tmpl.keywords && tmpl.keywords.length > 0) {
+          if (tmpl.keywords.every((kw: string) => upperText.includes(kw.trim().toUpperCase()))) {
+            detectedTemplate = tmpl.template_name;
+            break;
+          }
+        }
+      }
+
       let ocrResultId = `ocr-res-${Date.now()}`;
 
       // 3. Database Insertion: Store in `ocr_results_ocr` and bulk insert into `ocr_blocks_ocr`
@@ -109,6 +123,7 @@ router.post(
         raw_text: ocrResult.raw_text,
         raw_json_response: ocrResult.raw_json_response,
         processing_time_ms: ocrResult.processing_time_ms,
+        detected_template: detectedTemplate,
         created_at: new Date().toISOString()
       });
       inMemoryOcrBlocks.set(imageId, ocrResult.blocks);
@@ -120,6 +135,7 @@ router.post(
           ocr_result_id: ocrResultId,
           image_id: imageId,
           raw_text: ocrResult.raw_text,
+          detected_template: detectedTemplate,
           processing_time_ms: ocrResult.processing_time_ms,
           blocks_count: ocrResult.blocks.length,
           blocks: ocrResult.blocks

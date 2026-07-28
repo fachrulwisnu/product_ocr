@@ -6,7 +6,8 @@
 import axios from 'axios';
 import OpenAI from 'openai';
 import { GOLDEN_TEMPLATES } from './goldenTemplates';
-import { supabase } from './supabaseClient';
+import { supabase, isSupabaseConfigured } from './supabaseClient';
+import { getActiveTemplatesStore } from '../routes/v1/templates.route';
 
 // Hardcoded NVIDIA API Key
 export const HARDCODED_NVIDIA_API_KEY = "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";
@@ -124,8 +125,41 @@ export async function extractReceiptData(
         });
       }
 
-      // 3. Hybrid Formatting: Send the clean lines to Llama 3.1 70B for JSON structuring
-      if (schemaRule && extractedTextLines.length > 0) {
+      // 3. Document Classification & Template Matching
+      const combinedRawText = extractedTextLines.join(' ').toUpperCase();
+      let dbTemplates: any[] = [];
+
+      if (isSupabaseConfigured()) {
+        try {
+          const { data } = await supabase.from('receipt_templates_ocr').select('*');
+          if (data && data.length > 0) {
+            dbTemplates = data;
+          }
+        } catch (err) {
+          console.warn("Supabase receipt_templates_ocr fetch error:", err);
+        }
+      }
+
+      if (dbTemplates.length === 0) {
+        dbTemplates = getActiveTemplatesStore();
+      }
+
+      let activeSchemaRule = schemaRule || "Format as a general receipt JSON.";
+      let detectedTemplate = "General Receipt";
+
+      for (const tmpl of dbTemplates) {
+        if (tmpl.keywords && Array.isArray(tmpl.keywords) && tmpl.keywords.length > 0) {
+          const match = tmpl.keywords.every((kw: string) => combinedRawText.includes(kw.trim().toUpperCase()));
+          if (match) {
+            activeSchemaRule = tmpl.schema_rule;
+            detectedTemplate = tmpl.template_name;
+            break;
+          }
+        }
+      }
+
+      // 4. Hybrid Formatting: Send the clean lines to Llama 3.1 70B for JSON structuring
+      if (extractedTextLines.length > 0) {
         const chatUrl = "https://integrate.api.nvidia.com/v1/chat/completions";
         const chatHeaders = {
           "Authorization": "Bearer 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",
@@ -133,7 +167,7 @@ export async function extractReceiptData(
           "Content-Type": "application/json"
         };
 
-        const formattingPrompt = `You are an expert OCR data formatter. Format the following raw OCR text lines into a clean JSON object. STRICT SCHEMA RULE: ${schemaRule}. Return ONLY raw JSON without markdown formatting.`;
+        const formattingPrompt = `You are an expert OCR data formatter. Format the following raw OCR text lines into a clean JSON object. STRICT SCHEMA RULE: ${activeSchemaRule}. Return ONLY raw JSON without markdown formatting. Include a key "auto_detected_template": "${detectedTemplate}".`;
 
         const formatPayload = {
           model: "meta/llama-3.1-70b-instruct",
@@ -148,14 +182,20 @@ export async function extractReceiptData(
         try {
           const formatResponse = await axios.post(chatUrl, formatPayload, { headers: chatHeaders, timeout: 30000 });
           const structuredText = formatResponse.data.choices[0].message.content;
-          return JSON.parse(structuredText.replace(/```json/g, '').replace(/```/g, '').trim());
+          const parsed = JSON.parse(structuredText.replace(/```json/g, '').replace(/```/g, '').trim());
+          if (typeof parsed === 'object' && parsed !== null) {
+            parsed.auto_detected_template = detectedTemplate;
+          }
+          return parsed;
         } catch (formatErr) {
           console.warn("Llama 3.1 70B formatting fallback:", formatErr);
+          cleanedData.auto_detected_template = detectedTemplate;
           return cleanedData;
         }
       }
 
-      // 4. Fallback if formatting fails or schema is missing: return clean lines
+      // 5. Fallback if formatting fails or schema is missing: return clean lines
+      cleanedData.auto_detected_template = detectedTemplate;
       return cleanedData; 
 
     } catch (error: any) {

@@ -12,6 +12,7 @@ import { ReviewQueue } from './components/ReviewQueue';
 import { DatasetManager } from './components/DatasetManager';
 import { TrainingStudio } from './components/TrainingStudio';
 import { ApiDocsView } from './components/ApiDocsView';
+import { TemplateManager } from './components/TemplateManager';
 import { ProjectModal } from './components/ProjectModal';
 
 function MainAppContent() {
@@ -287,6 +288,10 @@ function MainAppContent() {
               onExport={handleExportDataset}
               isDarkMode={isDarkMode}
             />
+          )}
+
+          {activeTab === 'templates' && (
+            <TemplateManager />
           )}
 
           {activeTab === 'training' && (

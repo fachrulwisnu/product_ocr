@@ -88,10 +88,11 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
   const [hoveredFieldValue, setHoveredFieldValue] = useState<string | null>(null);
   const [hoveredFieldKey, setHoveredFieldKey] = useState<string | null>(null);
 
-  // Phase 3 NVIDIA Nemotron OCR States
+  // Phase 3 & Phase 4 NVIDIA Nemotron OCR & Classification States
   const [isProcessingNvidiaOcr, setIsProcessingNvidiaOcr] = useState<boolean>(false);
   const [nvidiaOcrBlocks, setNvidiaOcrBlocks] = useState<any[]>([]);
   const [rawOcrText, setRawOcrText] = useState<string>('');
+  const [detectedTemplate, setDetectedTemplate] = useState<string>('General Receipt');
   const [activeRightTab, setActiveRightTab] = useState<'fields' | 'raw_ocr'>('fields');
 
   // Fetch saved Phase 3 OCR results on image change
@@ -107,6 +108,11 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
           if (isMounted && json?.data) {
             setNvidiaOcrBlocks(json.data.blocks || []);
             setRawOcrText(json.data.ocr_result?.raw_text || '');
+            if (json.data.detected_template) {
+              setDetectedTemplate(json.data.detected_template);
+            } else if (json.data.ocr_result?.detected_template) {
+              setDetectedTemplate(json.data.ocr_result.detected_template);
+            }
           }
         }
       } catch (err) {
@@ -136,6 +142,9 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
         if (result?.data) {
           setNvidiaOcrBlocks(result.data.blocks || []);
           setRawOcrText(result.data.raw_text || '');
+          if (result.data.detected_template) {
+            setDetectedTemplate(result.data.detected_template);
+          }
           setActiveRightTab('raw_ocr');
           setShowBoundingBoxes(true);
         }
@@ -602,6 +611,14 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
               <option value="Passport" />
               <option value="Driver License" />
             </datalist>
+          </div>
+
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 font-mono text-[10px] font-bold shadow-xs">
+            <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+            <span className="text-slate-400">Auto-Detected Template:</span>
+            <span className="bg-emerald-600 text-white px-2 py-0.5 rounded text-[9px] uppercase tracking-wider font-extrabold">
+              {detectedTemplate}
+            </span>
           </div>
 
           {fewShotExamples.length > 0 && (

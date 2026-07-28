@@ -7,6 +7,7 @@ import {
   Database, 
   BrainCircuit, 
   Code2, 
+  FileCode2,
   Plus, 
   LogOut,
   UserCheck,
@@ -47,6 +48,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       badge: pendingReviewsCount > 0 ? pendingReviewsCount : undefined 
     },
     { id: 'dataset', label: 'Dataset Manager', icon: Database },
+    { id: 'templates', label: 'Template Manager', icon: FileCode2 },
     { id: 'training', label: 'Instant Learning', icon: BrainCircuit },
     { id: 'api-docs', label: 'REST API & Scalar', icon: Code2 }
   ];
