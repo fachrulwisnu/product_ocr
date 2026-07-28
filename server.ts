@@ -157,7 +157,7 @@ app.get('/api/images/:id', (req, res) => {
 // 5. Upload Image & Process VLM Direct Extraction
 app.post('/api/upload', async (req, res) => {
   try {
-    const { projectId, fileName, receiptType, imageData } = req.body;
+    const { projectId, fileName, receiptType, imageData, modelId } = req.body;
 
     if (!projectId) {
       return res.status(400).json({ error: 'projectId is required' });
@@ -172,11 +172,12 @@ app.post('/api/upload', async (req, res) => {
     const imageContent = imageData || generateReceiptSVG('FIRST NATIONAL BANK', receiptType || 'CASH WITHDRAWAL', 'ATM-9102-LA', '$100.00', '$2,150.00', '5', '0');
 
     const docCategory = receiptType || proj.receiptType || 'ATM Cash Withdrawal';
+    const chosenModel = modelId || 'meta/llama-3.2-90b-vision-instruct';
 
-    console.log(`[API /api/upload] Invoking NVIDIA Nemotron VLM for ${fileName || 'Document.png'} (${docCategory})...`);
+    console.log(`[API /api/upload] Invoking NVIDIA VLM (${chosenModel}) for ${fileName || 'Document.png'} (${docCategory})...`);
     
-    // Call NVIDIA Nemotron VLM for direct key-value reasoning with dynamic document category
-    const vlmResponse = await invokeNvidiaVlm(imageContent, docCategory);
+    // Call NVIDIA VLM for direct key-value reasoning with dynamic document category
+    const vlmResponse = await invokeNvidiaVlm(imageContent, docCategory, [], chosenModel);
     const fields = convertVlmJsonToFields(vlmResponse.extractedJson);
 
     const newImg: ReceiptImage = {
@@ -202,7 +203,7 @@ app.post('/api/upload', async (req, res) => {
 
     imagesStore.unshift(newImg);
     logActivity(projectId, 'upload', `Uploaded image ${newImg.fileName}`);
-    logActivity(projectId, 'ocr_processed', `NVIDIA Nemotron VLM 30B extraction completed for ${newImg.fileName}`);
+    logActivity(projectId, 'ocr_processed', `NVIDIA VLM (${chosenModel}) extraction completed for ${newImg.fileName}`);
 
     res.status(201).json({
       ...newImg,
@@ -217,13 +218,14 @@ app.post('/api/upload', async (req, res) => {
 // 5b. Direct VLM Completion Route
 app.post('/api/vlm', async (req, res) => {
   try {
-    const { image, documentType } = req.body;
+    const { image, documentType, modelId } = req.body;
     if (!image) {
       return res.status(400).json({ success: false, message: 'image base64 or data URI is required' });
     }
 
-    console.log(`[API /api/vlm] Executing NVIDIA Nemotron 30B VLM completion for ${documentType || 'General Document'}...`);
-    const result = await invokeNvidiaVlm(image, documentType || 'ATM Cash Withdrawal');
+    const chosenModel = modelId || 'meta/llama-3.2-90b-vision-instruct';
+    console.log(`[API /api/vlm] Executing NVIDIA VLM (${chosenModel}) completion for ${documentType || 'General Document'}...`);
+    const result = await invokeNvidiaVlm(image, documentType || 'ATM Cash Withdrawal', [], chosenModel);
     res.json(result);
   } catch (err: any) {
     console.error('Error in /api/vlm:', err);

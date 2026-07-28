@@ -12,7 +12,8 @@ export const HARDCODED_NVIDIA_API_KEY = "nvapi-Ksost2MWzg5tpSEnQv8Yq_OzzDbJcMAh3
 export async function extractFullReceipt(
   base64Image: string, 
   fewShotExamples: Record<string, any>[] = [],
-  documentType: string = "ATM Cash Withdrawal"
+  documentType: string = "ATM Cash Withdrawal",
+  modelId: string = "meta/llama-3.2-90b-vision-instruct"
 ): Promise<Record<string, any>> {
   const invokeUrl = "https://integrate.api.nvidia.com/v1/chat/completions";
   const stream = false;
@@ -59,40 +60,70 @@ Return strictly in this JSON format:
 
   const finalPromptText = `${systemPrompt}\n\n${fewShotContext}`;
 
-  const payload = {
-    "model": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
-    "max_tokens": 65536,
-    "reasoning_budget": 16384,
-    "stream": stream,
-    "temperature": 0.6,
-    "top_p": 0.95,
-    "messages": [
-      {
-        "role": "user",
-        "content": [
-          {
-            "type": "text",
-            "text": finalPromptText
-          },
-          {
-            "type": "image_url",
-            "image_url": {
-              "url": formattedImageUrl
-            }
+  const chosenModel = modelId || "meta/llama-3.2-90b-vision-instruct";
+
+  const messages = [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": finalPromptText
+        },
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": formattedImageUrl
           }
-        ]
-      }
-    ]
+        }
+      ]
+    }
+  ];
+
+  // Dynamically build payload based on the selected model
+  let payload: any = {
+    model: chosenModel,
+    messages: messages,
+    stream: stream,
   };
 
+  if (chosenModel === 'meta/llama-3.2-90b-vision-instruct') {
+    payload = {
+      ...payload,
+      frequency_penalty: 0,
+      max_tokens: 4096, // Increased from 512 to ensure large JSON responses fit
+      presence_penalty: 0,
+      temperature: 1,
+      top_p: 1
+    };
+  } else if (chosenModel === 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning') {
+    payload = {
+      ...payload,
+      max_tokens: 65536,
+      reasoning_budget: 16384,
+      temperature: 0.6,
+      top_p: 0.95
+    };
+  } else {
+    payload = {
+      ...payload,
+      max_tokens: 4096,
+      temperature: 0.7
+    };
+  }
+
   try {
-    const response = await axios.post(invokeUrl, payload, { headers, timeout: 30000 });
+    const response = await axios.post(invokeUrl, payload, {
+      headers: headers,
+      timeout: 90000 // FIX: Increased to 90 seconds
+    });
+    
     const extractedContent = response.data?.choices?.[0]?.message?.content || "";
     let cleaned = extractedContent.trim();
     if (cleaned.startsWith('```')) {
       cleaned = cleaned.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
     }
-    return JSON.parse(cleaned); 
+    return JSON.parse(cleaned);
   } catch (error) {
     console.error("VLM Extraction Error:", error);
     throw error;
@@ -158,9 +189,10 @@ export async function extractCroppedRegion(croppedBase64: string): Promise<strin
 export async function extractReceiptData(
   base64Image: string, 
   documentType: string = "ATM Cash Withdrawal",
+  modelId: string = "meta/llama-3.2-90b-vision-instruct",
   fewShotExamples: Record<string, any>[] = []
 ): Promise<Record<string, any>> {
-  return extractFullReceipt(base64Image, fewShotExamples, documentType);
+  return extractFullReceipt(base64Image, fewShotExamples, documentType, modelId);
 }
 
 export interface VlmExtractionResponse {
@@ -172,16 +204,17 @@ export interface VlmExtractionResponse {
 }
 
 /**
- * Invoke NVIDIA Nemotron VLM to extract dynamic key-value pairs from any document image.
+ * Invoke NVIDIA VLM to extract dynamic key-value pairs from any document image.
  */
 export async function invokeNvidiaVlm(
   imageDataUri: string, 
   documentType: string = "ATM Cash Withdrawal",
-  fewShotExamples: Record<string, any>[] = []
+  fewShotExamples: Record<string, any>[] = [],
+  modelId: string = "meta/llama-3.2-90b-vision-instruct"
 ): Promise<VlmExtractionResponse> {
   const startTime = Date.now();
   try {
-    const rawRes = await extractReceiptData(imageDataUri, documentType, fewShotExamples);
+    const rawRes = await extractReceiptData(imageDataUri, documentType, modelId, fewShotExamples);
 
     let documentCategory: string = rawRes.document_category || "";
     let extractedJson: Record<string, any> = (rawRes.extracted_data && typeof rawRes.extracted_data === 'object')

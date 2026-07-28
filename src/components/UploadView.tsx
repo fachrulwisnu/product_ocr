@@ -11,7 +11,8 @@ import {
   Sparkles,
   Zap,
   Image as ImageIcon,
-  FolderOpen
+  FolderOpen,
+  Cpu
 } from 'lucide-react';
 
 interface UploadViewProps {
@@ -30,6 +31,7 @@ export const UploadView: React.FC<UploadViewProps> = ({
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState<ReceiptType>('ATM Cash Withdrawal');
+  const [selectedModel, setSelectedModel] = useState<string>('meta/llama-3.2-90b-vision-instruct');
 
   const receiptTypes: ReceiptType[] = [
     'ATM Cash Withdrawal',
@@ -44,7 +46,7 @@ export const UploadView: React.FC<UploadViewProps> = ({
 
     setIsProcessing(true);
     setErrorMessage(null);
-    setStatusMessage('Invoking NVIDIA Nemotron 30B VLM & Extracting Key-Value Pairs...');
+    setStatusMessage(`Invoking NVIDIA VLM (${selectedModel.split('/')[1] || selectedModel}) & Extracting Key-Value Pairs...`);
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
@@ -56,8 +58,8 @@ export const UploadView: React.FC<UploadViewProps> = ({
           reader.readAsDataURL(file);
         });
 
-        // Task 3: Compress image to max 1024px JPEG at 0.8 quality
-        setStatusMessage(`Compressing & Sending ${file.name} to Nemotron VLM...`);
+        // Compress image to max 1024px JPEG at 0.8 quality
+        setStatusMessage(`Compressing & Sending ${file.name} to ${selectedModel.includes('llama') ? 'Llama 3.2 90B' : 'Nemotron 3'}...`);
         const compressedImageData = await compressImageForVlm(rawBase64, 1024, 0.8);
 
         const response = await fetch('/api/upload', {
@@ -67,7 +69,8 @@ export const UploadView: React.FC<UploadViewProps> = ({
             projectId: activeProject.id,
             fileName: file.name,
             receiptType: selectedType,
-            imageData: compressedImageData
+            imageData: compressedImageData,
+            modelId: selectedModel
           })
         });
 
@@ -93,7 +96,7 @@ export const UploadView: React.FC<UploadViewProps> = ({
     if (!activeProject) return;
 
     setIsProcessing(true);
-    setStatusMessage(`Running NVIDIA NIM OCR for preset ${presetType}...`);
+    setStatusMessage(`Running NVIDIA VLM (${selectedModel.includes('llama') ? 'Llama 3.2 90B' : 'Nemotron 3'}) for ${presetType}...`);
 
     const imageData = generateReceiptSVG(
       'FIRST NATIONAL BANK',
@@ -113,7 +116,8 @@ export const UploadView: React.FC<UploadViewProps> = ({
           projectId: activeProject.id,
           fileName: `Preset_${presetType.replace(/\s+/g, '_')}_${Date.now().toString().slice(-4)}.png`,
           receiptType: presetType,
-          imageData
+          imageData,
+          modelId: selectedModel
         })
       });
 
@@ -135,22 +139,46 @@ export const UploadView: React.FC<UploadViewProps> = ({
       {/* Header Info */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
         <div>
-          <h2 className="text-xl font-bold tracking-tight uppercase">Receipt Ingestion & NVIDIA Nemotron VLM</h2>
+          <h2 className="text-xl font-bold tracking-tight uppercase">Receipt Ingestion & NVIDIA VLM</h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Upload thermal ATM receipts (JPG, PNG, PDF). NVIDIA Nemotron 30B VLM extracts dynamic key-value transaction details automatically.
+            Upload thermal ATM receipts (JPG, PNG, PDF). NVIDIA Llama 3.2 90B or Nemotron 30B VLM extracts dynamic key-value transaction details automatically.
           </p>
         </div>
+      </div>
 
-        {/* Document Category Selector */}
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Document Category:</span>
+      {/* AI Model & Document Category Controls */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 rounded border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/80">
+        <div className="flex flex-col gap-1.5">
+          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+            <Cpu className="w-3.5 h-3.5 text-indigo-500" />
+            <span>Select AI Extraction Model</span>
+          </label>
+          <select
+            value={selectedModel}
+            onChange={(e) => setSelectedModel(e.target.value)}
+            className="text-xs font-bold px-3 py-2 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
+          >
+            <option value="meta/llama-3.2-90b-vision-instruct">
+              Llama 3.2 90B Vision - High Accuracy
+            </option>
+            <option value="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning">
+              Nemotron 3 Omni - Fast Reasoning
+            </option>
+          </select>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+            <FileText className="w-3.5 h-3.5 text-indigo-500" />
+            <span>Document Category</span>
+          </label>
           <input
             type="text"
             list="upload-document-categories"
             value={selectedType}
             onChange={(e) => setSelectedType(e.target.value)}
             placeholder="Select or type custom..."
-            className="text-xs font-bold px-3 py-1.5 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:outline-hidden min-w-[200px]"
+            className="text-xs font-bold px-3 py-2 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
           />
           <datalist id="upload-document-categories">
             <option value="ATM Cash Withdrawal" />
@@ -161,6 +189,7 @@ export const UploadView: React.FC<UploadViewProps> = ({
             <option value="Passport" />
             <option value="Driver License" />
             <option value="Bank Statement" />
+            <option value="Cassette Audit & Cleared" />
           </datalist>
         </div>
       </div>
