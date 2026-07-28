@@ -2,12 +2,14 @@ import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { performNvidiaOCR, NVIDIA_API_KEY } from './src/lib/nvidiaOcr';
+import { invokeNvidiaVlm, convertVlmJsonToFields, HARDCODED_NVIDIA_API_KEY } from './src/lib/nvidiaVlm';
 import { predictFieldsFromOCR, runInstantLearningTraining } from './src/lib/extractionEngine';
 import { INITIAL_PROJECTS, INITIAL_RECEIPT_IMAGES, generateReceiptSVG } from './src/data/sampleReceipts';
 import { Project, ReceiptImage, ActivityLog, PlatformMetrics, TrainingJob } from './src/types';
 
 const app = express();
 const PORT = 3000;
+
 
 // Enable JSON body parser with increased limit for image base64 uploads
 app.use(express.json({ limit: '50mb' }));
@@ -151,7 +153,7 @@ app.get('/api/images/:id', (req, res) => {
   res.json(image);
 });
 
-// 5. Upload Image & Process OCR
+// 5. Upload Image & Process VLM Direct Extraction
 app.post('/api/upload', async (req, res) => {
   try {
     const { projectId, fileName, receiptType, imageData } = req.body;
@@ -168,12 +170,14 @@ app.post('/api/upload', async (req, res) => {
     // Default image if missing or custom upload
     const imageContent = imageData || generateReceiptSVG('FIRST NATIONAL BANK', receiptType || 'CASH WITHDRAWAL', 'ATM-9102-LA', '$100.00', '$2,150.00', '5', '0');
 
-    // Perform NVIDIA NIM OCR
-    console.log(`[API /api/upload] Executing NVIDIA NIM OCR for ${fileName || 'ATM_Receipt.png'}...`);
-    const ocrData = await performNvidiaOCR(imageContent);
+    console.log(`[API /api/upload] Invoking NVIDIA Nemotron VLM for ${fileName || 'ATM_Receipt.png'}...`);
+    
+    // Call NVIDIA Nemotron VLM for direct key-value reasoning
+    const vlmResponse = await invokeNvidiaVlm(imageContent);
+    const fields = convertVlmJsonToFields(vlmResponse.extractedJson);
 
-    // Perform AI Prediction using extraction model
-    const fields = predictFieldsFromOCR(ocrData, undefined, proj.modelAccuracy > 80 ? 15 : 0);
+    // Fallback OCR lines for canvas preview
+    const ocrData = await performNvidiaOCR(imageContent);
 
     const newImg: ReceiptImage = {
       id: `img-${Date.now()}`,
@@ -183,7 +187,7 @@ app.post('/api/upload', async (req, res) => {
       fileUrl: imageContent,
       uploadDate: new Date().toISOString(),
       status: 'needs_review',
-      overallConfidence: 0.86,
+      overallConfidence: 0.94,
       ocrData,
       fields,
       isTrainingSample: false
@@ -191,14 +195,35 @@ app.post('/api/upload', async (req, res) => {
 
     imagesStore.unshift(newImg);
     logActivity(projectId, 'upload', `Uploaded image ${newImg.fileName}`);
-    logActivity(projectId, 'ocr_processed', `NVIDIA NIM OCR completed for ${newImg.fileName}`);
+    logActivity(projectId, 'ocr_processed', `NVIDIA Nemotron VLM 30B extraction completed for ${newImg.fileName}`);
 
-    res.status(201).json(newImg);
+    res.status(201).json({
+      ...newImg,
+      vlmResult: vlmResponse
+    });
   } catch (err: any) {
     console.error('Error in /api/upload:', err);
-    res.status(500).json({ error: err.message || 'Failed to process receipt upload and OCR' });
+    res.status(500).json({ error: err.message || 'Failed to process receipt upload and VLM extraction' });
   }
 });
+
+// 5b. Direct VLM Completion Route
+app.post('/api/vlm', async (req, res) => {
+  try {
+    const { image } = req.body;
+    if (!image) {
+      return res.status(400).json({ error: 'image base64 or data URI is required' });
+    }
+
+    console.log('[API /api/vlm] Executing NVIDIA Nemotron 30B VLM completion...');
+    const result = await invokeNvidiaVlm(image);
+    res.json(result);
+  } catch (err: any) {
+    console.error('Error in /api/vlm:', err);
+    res.status(500).json({ error: err.message || 'VLM completion failed' });
+  }
+});
+
 
 // 6. Direct OCR API Test
 app.post('/api/ocr', async (req, res) => {

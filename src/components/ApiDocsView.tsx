@@ -22,10 +22,17 @@ export const ApiDocsView: React.FC<ApiDocsViewProps> = ({ isDarkMode }) => {
   const endpoints = [
     {
       method: 'POST',
+      path: '/api/vlm',
+      description: 'NVIDIA Nemotron 30B VLM direct reasoning key-value extraction',
+      body: '{\n  "image": "data:image/png;base64,..."\n}'
+    },
+    {
+      method: 'POST',
       path: '/api/upload',
-      description: 'Upload receipt image & invoke NVIDIA NIM OCR API',
+      description: 'Upload receipt image & run VLM key-value discovery',
       body: '{\n  "projectId": "proj-atm-main",\n  "receiptType": "ATM Cash Withdrawal",\n  "fileName": "ATM_Receipt.png"\n}'
     },
+
     {
       method: 'POST',
       path: '/api/predict',

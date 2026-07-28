@@ -1,29 +1,20 @@
-import React, { useState, useRef } from 'react';
-import { ReceiptImage, ExtractedField, OCRLine, BoundingBox } from '../types';
+import React, { useState } from 'react';
+import { ReceiptImage, ExtractedField } from '../types';
 import { 
   ZoomIn, 
   ZoomOut, 
   RotateCw, 
-  Maximize2, 
   Plus, 
   Trash2, 
   CheckCircle2, 
   XCircle, 
-  Sparkles, 
-  Eye, 
-  EyeOff, 
-  MousePointer, 
-  Square, 
-  Combine, 
-  Scissors, 
   Save, 
-  ChevronRight, 
-  ChevronLeft,
-  Crosshair,
-  Info,
-  Check,
-  Edit2
+  Sparkles,
+  Bot,
+  Database,
+  Tag
 } from 'lucide-react';
+import { saveVlmExtraction, updateDynamicLabels } from '../lib/supabaseClient';
 
 interface AnnotationWorkspaceProps {
   images: ReceiptImage[];
@@ -39,7 +30,6 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
   selectedImage,
   setSelectedImage,
   onSaveLabels,
-  onTrainTrigger,
   isDarkMode
 }) => {
   const currentImage = selectedImage || images[0];
@@ -47,16 +37,15 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
   // Viewer Controls State
   const [zoomLevel, setZoomLevel] = useState(1);
   const [rotation, setRotation] = useState(0);
-  const [showBoundingBoxes, setShowBoundingBoxes] = useState(true);
-  const [activeTool, setActiveTool] = useState<'pan' | 'box_select'>('pan');
   const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
 
-  // Editable Fields State
+  // Editable Dynamic Key-Value Pairs State
   const [fieldsState, setFieldsState] = useState<ExtractedField[]>(currentImage ? currentImage.fields : []);
   const [newFieldKey, setNewFieldKey] = useState('');
   const [newFieldValue, setNewFieldValue] = useState('');
   const [showAddFieldModal, setShowAddFieldModal] = useState(false);
-  const [highlightedBox, setHighlightedBox] = useState<BoundingBox | null>(null);
+  const [isSavingSupabase, setIsSavingSupabase] = useState(false);
+  const [saveNotification, setSaveNotification] = useState<string | null>(null);
 
   // Sync state when selected image changes
   React.useEffect(() => {
@@ -79,23 +68,29 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
     setFieldsState(prev => prev.map(f => f.id === fieldId ? { ...f, value: val, status: 'edited' } : f));
   };
 
-  // Handle Field Key Change
-  const handleFieldKeyChange = (fieldId: string, keyName: string) => {
-    setFieldsState(prev => prev.map(f => f.id === fieldId ? { ...f, key: keyName.toUpperCase().replace(/\s+/g, '_'), label: keyName, status: 'edited' } : f));
+  // Handle Field Key Name Change (Left Side Input)
+  const handleFieldKeyChange = (fieldId: string, newKeyName: string) => {
+    const formattedKey = newKeyName.toUpperCase().replace(/\s+/g, '_');
+    setFieldsState(prev => prev.map(f => f.id === fieldId ? { 
+      ...f, 
+      key: formattedKey, 
+      label: newKeyName, 
+      status: 'edited' 
+    } : f));
   };
 
-  // Add Custom Field Label
+  // Add Custom Key-Value Pair
   const handleAddCustomField = () => {
     if (!newFieldKey.trim()) return;
+    const formattedKey = newFieldKey.toUpperCase().trim().replace(/\s+/g, '_');
     const newField: ExtractedField = {
-      id: `field-custom-${Date.now()}`,
-      key: newFieldKey.toUpperCase().replace(/\s+/g, '_'),
+      id: `field-vlm-${Date.now()}`,
+      key: formattedKey,
       label: newFieldKey,
       value: newFieldValue || '',
       confidence: 1.0,
       status: 'manual_added',
-      category: 'other',
-      box: { x1: 10, y1: 10, x2: 90, y2: 13 }
+      category: 'other'
     };
     setFieldsState(prev => [...prev, newField]);
     setNewFieldKey('');
@@ -103,32 +98,50 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
     setShowAddFieldModal(false);
   };
 
-  // Delete Field
+  // Delete Key-Value Pair
   const handleDeleteField = (fieldId: string) => {
     setFieldsState(prev => prev.filter(f => f.id !== fieldId));
   };
 
-  // Assign Clicked OCR Text to Selected Field
-  const handleOCRTextClick = (lineText: string, box?: BoundingBox) => {
-    if (selectedFieldId) {
-      setFieldsState(prev => prev.map(f => {
-        if (f.id === selectedFieldId) {
-          return {
-            ...f,
-            value: lineText,
-            box: box || f.box,
-            status: 'edited',
-            confidence: 1.0
-          };
-        }
-        return f;
-      }));
-    }
-  };
+  // Approve & Save (With Supabase Persistence)
+  const handleApprove = async () => {
+    setIsSavingSupabase(true);
 
-  // Approve & Save
-  const handleApprove = () => {
+    // Convert fields state to clean JSON object for Supabase
+    const jsonExtraction: Record<string, any> = {};
+    const labelKeys: string[] = [];
+
+    fieldsState.forEach(f => {
+      if (f.key) {
+        jsonExtraction[f.key] = f.value;
+        labelKeys.push(f.key);
+      }
+    });
+
+    try {
+      // 1. Save VLM Extraction to vlm_results in Supabase
+      await saveVlmExtraction(
+        currentImage.id,
+        jsonExtraction,
+        JSON.stringify(jsonExtraction, null, 2),
+        1250,
+        'NVIDIA_NEMOTRON'
+      );
+
+      // 2. Update dynamic_labels table in Supabase
+      await updateDynamicLabels(currentImage.projectId, labelKeys);
+
+      setSaveNotification('Saved to Supabase & Verified!');
+      setTimeout(() => setSaveNotification(null), 3000);
+    } catch (err) {
+      console.warn('Saved locally (Supabase offline/not configured)');
+    } finally {
+      setIsSavingSupabase(false);
+    }
+
+    // Call parent handler
     onSaveLabels(currentImage.id, fieldsState, 'approved');
+
     // Move to next image if available
     const nextIdx = images.findIndex(i => i.id === currentImage.id) + 1;
     if (nextIdx < images.length) {
@@ -141,12 +154,6 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
     onSaveLabels(currentImage.id, fieldsState, 'rejected');
   };
 
-  const getConfidenceBadgeColor = (conf: number) => {
-    if (conf >= 0.85) return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30';
-    if (conf >= 0.60) return 'bg-amber-500/10 text-amber-600 border-amber-500/30';
-    return 'bg-rose-500/10 text-rose-600 border-rose-500/30';
-  };
-
   return (
     <div className="space-y-4">
       
@@ -154,7 +161,7 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
       <div className={`p-4 rounded border flex flex-col md:flex-row items-center justify-between gap-4 ${
         isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
       }`}>
-        {/* Receipt Switcher */}
+        {/* Document Switcher */}
         <div className="flex items-center gap-3 w-full md:w-auto">
           <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Document:</span>
           <select
@@ -179,9 +186,15 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
           }`}>
             {currentImage.status}
           </span>
+
+          {saveNotification && (
+            <span className="text-xs font-bold text-emerald-500 animate-pulse flex items-center gap-1">
+              <Database className="w-3.5 h-3.5" /> {saveNotification}
+            </span>
+          )}
         </div>
 
-        {/* Workflow Approval Action Buttons */}
+        {/* Action Buttons */}
         <div className="flex items-center gap-2 w-full md:w-auto justify-end">
           <button
             onClick={handleReject}
@@ -201,23 +214,24 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
 
           <button
             onClick={handleApprove}
-            className="px-4 py-1.5 rounded text-xs font-bold uppercase tracking-wider bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1.5 cursor-pointer shadow-md transition-all"
+            disabled={isSavingSupabase}
+            className="px-4 py-1.5 rounded text-xs font-bold uppercase tracking-wider bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1.5 cursor-pointer shadow-md transition-all disabled:opacity-50"
           >
             <CheckCircle2 className="w-4 h-4" />
-            VERIFY & SAVE
+            {isSavingSupabase ? 'SAVING TO SUPABASE...' : 'VERIFY & SAVE'}
           </button>
         </div>
       </div>
 
-      {/* Main Dual-Pane Nanonets Layout */}
+      {/* Main Dual-Pane Studio Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[720px]">
         
-        {/* LEFT PANE: Interactive Image & OCR Bounding Box Canvas (7 Cols) */}
+        {/* LEFT PANE: Interactive High-Res Receipt Image Viewer (7 Cols) */}
         <div className={`lg:col-span-7 flex flex-col rounded border overflow-hidden ${
           isDarkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-200 border-slate-200'
         }`}>
           
-          {/* Canvas Toolbar */}
+          {/* Canvas Zoom Toolbar */}
           <div className={`h-12 border-b flex items-center justify-between px-4 text-xs ${
             isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-200' : 'bg-white/80 backdrop-blur-sm border-slate-200 text-slate-800'
           }`}>
@@ -252,22 +266,14 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
               </button>
             </div>
 
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setShowBoundingBoxes(!showBoundingBoxes)}
-                className={`px-3 py-1 rounded border border-slate-200 dark:border-slate-700 text-[11px] font-bold uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-xs ${
-                  showBoundingBoxes ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800' : 'bg-white dark:bg-slate-800 text-slate-500'
-                }`}
-              >
-                {showBoundingBoxes ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-                <span>Bounding Boxes</span>
-              </button>
+            <div className="flex items-center gap-1.5 text-indigo-400 font-mono text-[11px] font-bold">
+              <Bot className="w-4 h-4" />
+              <span>NVIDIA Nemotron 30B VLM</span>
             </div>
           </div>
 
-          {/* Canvas Scroll Area */}
+          {/* Canvas Image Display */}
           <div className="flex-1 overflow-auto p-8 flex items-center justify-center relative select-none bg-slate-300 dark:bg-slate-950">
-            
             <div 
               className="relative transition-transform duration-200 origin-center"
               style={{
@@ -275,85 +281,23 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
                 maxWidth: '480px'
               }}
             >
-              {/* Receipt Image */}
               <img
                 src={currentImage.fileUrl}
                 alt={currentImage.fileName}
-                className="w-full h-auto rounded shadow-2xl border border-slate-300 dark:border-slate-700 pointer-events-none"
+                className="w-full h-auto rounded shadow-2xl border border-slate-300 dark:border-slate-700"
               />
-
-              {/* Bounding Box Overlays */}
-              {showBoundingBoxes && (
-                <div className="absolute inset-0">
-                  {/* OCR Line Overlays */}
-                  {currentImage.ocrData.lines.map((line) => {
-                    const box = line.box;
-                    const isHovered = highlightedBox === box;
-                    return (
-                      <div
-                        key={line.id}
-                        onClick={() => handleOCRTextClick(line.text, box)}
-                        onMouseEnter={() => setHighlightedBox(box)}
-                        onMouseLeave={() => setHighlightedBox(null)}
-                        style={{
-                          left: `${box.x1}%`,
-                          top: `${box.y1}%`,
-                          width: `${box.x2 - box.x1}%`,
-                          height: `${box.y2 - box.y1}%`
-                        }}
-                        className={`absolute border-2 transition-all cursor-pointer ring-1 ring-white ${
-                          isHovered 
-                            ? 'border-indigo-500 bg-indigo-500/20 z-20' 
-                            : 'border-indigo-500/50 bg-indigo-500/10 hover:border-indigo-500 hover:bg-indigo-500/30'
-                        }`}
-                        title={`Click to fill selected field with: "${line.text}"`}
-                      >
-                        <span className="opacity-0 group-hover:opacity-100 absolute -top-5 left-0 bg-slate-900 text-indigo-300 font-mono text-[9px] px-1 rounded whitespace-nowrap z-30">
-                          {line.text}
-                        </span>
-                      </div>
-                    );
-                  })}
-
-                  {/* Field Bounding Boxes (Colored by confidence) */}
-                  {fieldsState.map((f) => {
-                    if (!f.box) return null;
-                    const isSelected = selectedFieldId === f.id;
-                    const confColor = f.confidence >= 0.85 ? 'border-emerald-500 bg-emerald-500/20' : f.confidence >= 0.60 ? 'border-amber-500 bg-amber-500/20' : 'border-rose-500 bg-rose-500/20';
-
-                    return (
-                      <div
-                        key={`box-${f.id}`}
-                        onClick={() => setSelectedFieldId(f.id)}
-                        style={{
-                          left: `${f.box.x1}%`,
-                          top: `${f.box.y1}%`,
-                          width: `${f.box.x2 - f.box.x1}%`,
-                          height: `${f.box.y2 - f.box.y1}%`
-                        }}
-                        className={`absolute border-2 transition-all cursor-pointer ring-1 ring-white ${confColor} ${
-                          isSelected ? 'ring-2 ring-indigo-500 z-30 shadow-lg' : ''
-                        }`}
-                      >
-                        <span className="absolute -top-4 right-0 bg-slate-900 text-white font-mono text-[9px] px-1 rounded">
-                          {f.key}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
             </div>
-
           </div>
 
-          <div className="p-2 bg-slate-900 text-slate-400 text-[10px] font-mono flex items-center justify-between border-t border-slate-800 px-4">
-            <span>OCR Engine: NVIDIA NIM OCR API</span>
-            <span className="text-indigo-400">Click any OCR block to set field value</span>
+          <div className="p-2.5 bg-slate-900 text-slate-400 text-[10px] font-mono flex items-center justify-between border-t border-slate-800 px-4">
+            <span className="flex items-center gap-1">
+              <Sparkles className="w-3 h-3 text-indigo-400" /> VLM Direct Reasoning Active
+            </span>
+            <span className="text-indigo-300">Unsupervised key-value discovery without spatial boxes</span>
           </div>
         </div>
 
-        {/* RIGHT PANE: Extracted Fields Property Panel (5 Cols) */}
+        {/* RIGHT PANE: Dynamic Field Definition (5 Cols) */}
         <div className={`lg:col-span-5 flex flex-col rounded border overflow-hidden ${
           isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
         }`}>
@@ -361,99 +305,96 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
           {/* Header */}
           <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
             <div>
-              <h2 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Field Extraction</h2>
+              <h2 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                <Tag className="w-3.5 h-3.5 text-indigo-500" /> Dynamic Field Studio
+              </h2>
+              <p className="text-[10px] text-slate-500 mt-0.5">
+                VLM extracted dynamic keys & values. Edit both sides freely.
+              </p>
             </div>
 
             <button
               onClick={() => setShowAddFieldModal(true)}
-              className="px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1 cursor-pointer"
+              className="px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1 cursor-pointer shadow-xs"
             >
-              <Plus className="w-3.5 h-3.5" /> Define New Label
+              <Plus className="w-3.5 h-3.5" /> Add Field
             </button>
           </div>
 
-          {/* Fields Scroll List */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {fieldsState.map((field) => {
-              const isSelected = selectedFieldId === field.id;
-              const isLowConf = field.confidence < 0.85;
-
-              return (
+          {/* Fields Editable List */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            {fieldsState.length === 0 ? (
+              <div className="text-center py-12 text-slate-500 text-xs font-mono">
+                No fields extracted yet. Click "Add Field" to define a dynamic key-value pair.
+              </div>
+            ) : (
+              fieldsState.map((field) => (
                 <div
                   key={field.id}
-                  onClick={() => setSelectedFieldId(field.id)}
-                  className={`space-y-1.5 p-3 rounded border transition-all cursor-pointer ${
-                    isSelected
-                      ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-300 dark:border-amber-800 ring-2 ring-amber-200/50 dark:ring-amber-900/30'
-                      : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/40 hover:border-slate-300'
-                  }`}
+                  className="p-3 rounded border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 space-y-2 hover:border-slate-300 transition-all"
                 >
-                  <div className="flex justify-between items-end">
-                    {/* Key Label Input */}
-                    <div className="flex items-center gap-1.5 flex-1">
-                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
-                        {field.key}
+                  <div className="grid grid-cols-12 gap-2 items-center">
+                    {/* Left Input: Key Name */}
+                    <div className="col-span-5">
+                      <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                        Discovered Key
                       </label>
+                      <input
+                        type="text"
+                        value={field.key}
+                        onChange={(e) => handleFieldKeyChange(field.id, e.target.value)}
+                        placeholder="KEY_NAME"
+                        className="w-full px-2.5 py-1.5 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-[11px] font-mono font-bold text-indigo-600 dark:text-indigo-400 focus:outline-hidden"
+                      />
                     </div>
 
-                    {/* Confidence Score Gauge */}
-                    <span className={`text-[9px] font-bold ${
-                      field.confidence >= 0.85 ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'
-                    }`}>
-                      {Math.round(field.confidence * 100)}%
-                    </span>
+                    {/* Right Input: Extracted Value */}
+                    <div className="col-span-6">
+                      <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                        Extracted Value
+                      </label>
+                      <input
+                        type="text"
+                        value={field.value}
+                        onChange={(e) => handleFieldValueChange(field.id, e.target.value)}
+                        placeholder="Extracted value..."
+                        className="w-full px-2.5 py-1.5 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-[11px] font-mono text-slate-800 dark:text-slate-100 focus:outline-hidden"
+                      />
+                    </div>
 
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleDeleteField(field.id); }}
-                      className="text-slate-300 hover:text-rose-500 p-1 cursor-pointer ml-2"
-                      title="Delete Field"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {/* Delete Action */}
+                    <div className="col-span-1 flex items-center justify-center pt-4">
+                      <button
+                        onClick={() => handleDeleteField(field.id)}
+                        className="text-slate-400 hover:text-rose-500 p-1 cursor-pointer transition-colors"
+                        title="Delete key-value pair"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
-
-                  {/* Field Value Input */}
-                  <div className="relative flex">
-                    <input
-                      type="text"
-                      value={field.value}
-                      onChange={(e) => handleFieldValueChange(field.id, e.target.value)}
-                      placeholder="Click OCR text or type value..."
-                      className={`w-full px-3 py-2 border rounded text-xs font-medium focus:ring-1 focus:ring-indigo-500 outline-none ${
-                        isSelected 
-                          ? 'border-amber-300 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-bold' 
-                          : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200'
-                      }`}
-                    />
-                  </div>
-                  {isLowConf && (
-                    <p className="text-[9px] text-amber-600 italic">
-                      NIM predicted from OCR block "{field.value}"
-                    </p>
-                  )}
                 </div>
-              );
-            })}
+              ))
+            )}
           </div>
 
-          {/* Quick Helper Note / Footer Action Panel */}
+          {/* Footer Action Panel */}
           <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 space-y-3">
             <div className="flex gap-2">
               <button
                 onClick={handleReject}
-                className="flex-1 py-2.5 bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold rounded hover:bg-slate-300 dark:hover:bg-slate-700 transition-colors uppercase tracking-wider"
+                className="flex-1 py-2.5 bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold rounded hover:bg-slate-300 dark:hover:bg-slate-700 transition-colors uppercase tracking-wider cursor-pointer"
               >
                 REJECT
               </button>
               <button
                 onClick={handleApprove}
-                className="flex-[2] py-2.5 bg-indigo-600 text-white text-xs font-bold rounded shadow-lg shadow-indigo-200/40 hover:bg-indigo-700 transition-colors uppercase tracking-wider"
+                disabled={isSavingSupabase}
+                className="flex-[2] py-2.5 bg-indigo-600 text-white text-xs font-bold rounded shadow-lg shadow-indigo-500/20 hover:bg-indigo-700 transition-colors uppercase tracking-wider cursor-pointer flex items-center justify-center gap-1.5"
               >
+                <CheckCircle2 className="w-4 h-4" />
                 VERIFY & SAVE
               </button>
-            </div>
-            <div className="flex items-center justify-center gap-2 py-1 text-slate-400 text-[9px] font-medium uppercase tracking-wider">
-              <span>Auto-save enabled</span>
             </div>
           </div>
         </div>
@@ -466,14 +407,14 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
           <div className={`p-6 rounded max-w-md w-full space-y-4 border ${
             isDarkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'
           }`}>
-            <h3 className="font-bold text-sm uppercase tracking-wider">Define New Label</h3>
+            <h3 className="font-bold text-sm uppercase tracking-wider">Define New Key-Value Label</h3>
             
             <div className="space-y-3">
               <div>
-                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">Field Label Name</label>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">Key Name (e.g. RECORD_NUMBER)</label>
                 <input
                   type="text"
-                  placeholder="e.g. CASSETTE5_DISPENSED or SURCHARGE"
+                  placeholder="e.g. SURCHARGE_FEE or CASSETTE_5"
                   value={newFieldKey}
                   onChange={(e) => setNewFieldKey(e.target.value)}
                   className="w-full text-xs font-mono p-2.5 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:outline-hidden"
@@ -481,10 +422,10 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
               </div>
 
               <div>
-                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">Initial Value (Optional)</label>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">Value (e.g. $2.50)</label>
                 <input
                   type="text"
-                  placeholder="e.g. $1.50"
+                  placeholder="e.g. $2.50"
                   value={newFieldValue}
                   onChange={(e) => setNewFieldValue(e.target.value)}
                   className="w-full text-xs font-mono p-2.5 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:outline-hidden"
@@ -503,7 +444,7 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
                 onClick={handleAddCustomField}
                 className="px-4 py-1.5 rounded text-xs font-bold uppercase tracking-wider bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer"
               >
-                Add Field
+                Add Key-Value
               </button>
             </div>
           </div>

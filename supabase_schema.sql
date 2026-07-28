@@ -1,40 +1,8 @@
-# Nanonets ATM Receipt VLM Extractor Platform
+-- =========================================================================
+-- ATM RECEIPT EXTRACTOR - VLM SUPABASE POSTGRESQL SCHEMA
+-- Engine: NVIDIA Nemotron-3 Nano Omni 30B Reasoning VLM
+-- =========================================================================
 
-Vision-Language Model (VLM) Unsupervised Dynamic Key-Value Extractor for ATM Receipts powered by **NVIDIA Nemotron 30B VLM (`nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`)** and Supabase.
-
----
-
-## 🚀 How to Run locally
-
-Built on **Full-Stack Express.js + Vite (React + TypeScript)**.
-
-```bash
-# 1. Install dependencies
-npm install
-
-# 2. Run local development server
-npm run dev
-```
-
-App and REST API will be active at:
-👉 **http://localhost:3000**
-
----
-
-## 🤖 VLM API Integration (NVIDIA Nemotron 30B)
-
-The application communicates directly with NVIDIA's Vision-Language Model endpoint:
-- **Endpoint:** `https://integrate.api.nvidia.com/v1/chat/completions`
-- **Model:** `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`
-- **Authorization Header:** Hardcoded `Bearer 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`
-
----
-
-## 🗄️ Supabase PostgreSQL Schema
-
-Execute this SQL DDL script in your Supabase SQL Editor:
-
-```sql
 -- 1. Projects Table
 CREATE TABLE IF NOT EXISTS projects (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -82,18 +50,13 @@ CREATE TABLE IF NOT EXISTS dynamic_labels (
     CONSTRAINT unique_project_label UNIQUE (project_id, label_key)
 );
 
--- Indexes
+-- Create Indexes for High Performance JSONB & FK Queries
 CREATE INDEX IF NOT EXISTS idx_images_project_id ON images(project_id);
 CREATE INDEX IF NOT EXISTS idx_vlm_results_image_id ON vlm_results(image_id);
 CREATE INDEX IF NOT EXISTS idx_vlm_results_jsonb ON vlm_results USING GIN (extracted_json);
 CREATE INDEX IF NOT EXISTS idx_dynamic_labels_project_key ON dynamic_labels(project_id, label_key);
-```
 
----
-
-## 🛠️ Key Capabilities
-
-1. **Unsupervised VLM Extraction:** Extracts dynamic key-value pairs (`ATM_LOCATION`, `WITHDRAWAL_AMOUNT`, `CASSETTE_DISPENSED`, etc.) in one shot without requiring predefined bounding box coordinates.
-2. **Dynamic Field Studio:** Interactive workspace allowing operators to edit both key names and values before saving.
-3. **Supabase Auto-Sync:** Saves JSON extractions into `vlm_results` (`JSONB`) and registers discovered key names into `dynamic_labels`.
-4. **REST API Endpoints:** `/api/vlm`, `/api/upload`, `/api/projects`, `/api/images`, `/api/metrics`.
+-- Sample Seed Data
+INSERT INTO projects (name, description, document_type, status)
+VALUES ('ATM Receipt Intelligence', 'Vision-Language Model extraction for multi-bank thermal ATM receipts', 'ATM_RECEIPT', 'ACTIVE')
+ON CONFLICT DO NOTHING;

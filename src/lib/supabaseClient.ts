@@ -85,6 +85,116 @@ export interface SupabaseLabelRow {
   created_at?: string;
 }
 
+export interface SupabaseVlmResultRow {
+  id?: string;
+  image_id: string;
+  provider?: string;
+  raw_response_text?: string;
+  extracted_json: Record<string, any>;
+  processing_time_ms?: number;
+  created_at?: string;
+}
+
+export interface SupabaseDynamicLabelRow {
+  id?: string;
+  project_id: string;
+  label_key: string;
+  is_validated?: boolean;
+  created_at?: string;
+}
+
+/** Save VLM Extraction result into Supabase vlm_results table */
+export async function saveVlmExtraction(
+  imageId: string,
+  extractedJson: Record<string, any>,
+  rawResponseText: string = '',
+  processingTimeMs: number = 0,
+  provider: string = 'NVIDIA_NEMOTRON'
+): Promise<SupabaseVlmResultRow | null> {
+  const sb = getSupabase();
+  if (!sb) {
+    console.warn('[Supabase] Supabase is not configured or offline. VLM extraction preserved in local state.');
+    return null;
+  }
+
+  try {
+    const record: SupabaseVlmResultRow = {
+      image_id: imageId,
+      provider,
+      raw_response_text: rawResponseText || JSON.stringify(extractedJson),
+      extracted_json: extractedJson,
+      processing_time_ms: processingTimeMs,
+      created_at: new Date().toISOString()
+    };
+
+    const { data, error } = await sb.from('vlm_results').insert([record]).select().single();
+    if (error) {
+      console.error('Error saving VLM extraction to Supabase vlm_results:', error);
+      return null;
+    }
+    console.log('[Supabase] Successfully persisted VLM extraction to vlm_results table:', data.id);
+    return data;
+  } catch (err) {
+    console.error('Exception in saveVlmExtraction:', err);
+    return null;
+  }
+}
+
+/** Update or insert newly discovered key labels into dynamic_labels table for a project */
+export async function updateDynamicLabels(
+  projectId: string,
+  keysArray: string[]
+): Promise<SupabaseDynamicLabelRow[]> {
+  const sb = getSupabase();
+  if (!sb) return [];
+
+  try {
+    // 1. Fetch existing dynamic labels for project
+    const { data: existingLabels, error: fetchErr } = await sb
+      .from('dynamic_labels')
+      .select('label_key')
+      .eq('project_id', projectId);
+
+    if (fetchErr) {
+      console.error('Error fetching existing dynamic_labels:', fetchErr);
+    }
+
+    const existingKeysSet = new Set((existingLabels || []).map(l => l.label_key));
+
+    // 2. Filter new unique keys
+    const newKeys = keysArray.filter(k => k && !existingKeysSet.has(k));
+
+    if (newKeys.length === 0) {
+      console.log('[Supabase] All discovered keys already exist in dynamic_labels.');
+      return [];
+    }
+
+    const rowsToInsert: SupabaseDynamicLabelRow[] = newKeys.map(k => ({
+      project_id: projectId,
+      label_key: k,
+      is_validated: true,
+      created_at: new Date().toISOString()
+    }));
+
+    const { data: insertedData, error: insertErr } = await sb
+      .from('dynamic_labels')
+      .insert(rowsToInsert)
+      .select();
+
+    if (insertErr) {
+      console.error('Error inserting new dynamic_labels:', insertErr);
+      return [];
+    }
+
+    console.log(`[Supabase] Successfully inserted ${insertedData?.length || 0} new dynamic_labels records.`);
+    return insertedData || [];
+  } catch (err) {
+    console.error('Exception in updateDynamicLabels:', err);
+    return [];
+  }
+}
+
+
 /** Fetch all projects from Supabase */
 export async function fetchSupabaseProjects(): Promise<SupabaseProjectRow[]> {
   const sb = getSupabase();
