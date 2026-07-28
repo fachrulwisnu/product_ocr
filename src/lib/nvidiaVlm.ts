@@ -5,6 +5,7 @@
  */
 
 import axios from 'axios';
+import { getGoldenTemplatesPrompt } from './goldenTemplates';
 
 // Hardcoded NVIDIA API Key as requested by project specifications
 export const HARDCODED_NVIDIA_API_KEY = "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";
@@ -31,18 +32,30 @@ export async function extractFullReceipt(
     formattedImageUrl = `data:image/png;base64,${base64Image}`;
   }
 
-  const systemPrompt = `You are an expert Data Engineer parsing thermal ATM Cassette Audit and Replenishment receipts (e.g., MNC, BRI, Permata, OCBC) and documents.
-The image contains tabular data where rows (e.g., CASSETTE, REJECTED, REMAINING, DISPENSED, TOTAL or Denominations like 100K, 50K) intersect with columns (e.g., TYPE 1, TYPE 2, INIT, DISP, DEP, REM).
+  // Detect bank code from documentType if present
+  let matchedBankCode: string | undefined = undefined;
+  const docTypeUpper = (documentType || "").toUpperCase();
+  for (const code of ['MNC', 'PERMATA', 'OCBC', 'BRI', 'SMBC']) {
+    if (docTypeUpper.includes(code)) {
+      matchedBankCode = code;
+      break;
+    }
+  }
+
+  const goldenTemplatesPrompt = getGoldenTemplatesPrompt(matchedBankCode);
+
+  const systemPrompt = `You are an expert OCR Data Engineer parsing Indonesian Cassette Audit receipts and documents.
+Your primary directive is to map the unstructured text into the exact nested JSON schema provided in the Golden Templates below.
+If the receipt is heavily folded or faded, use the Golden Template to infer the missing structural keys (e.g., if 'REMAINING' is unreadable but the number aligns with the 3rd row of TYPE_1, map it to TYPE_1.REMAINING).
 
 CRITICAL INSTRUCTIONS:
 1. Spatial Alignment: Read line by line. Carefully trace the vertical alignment of numbers to their correct header columns.
-2. Nested Output: Structure tabular data hierarchically. Use Column Headers (or Cassette Types) as primary keys, and row labels as secondary keys.
-3. Example Format for Cassette Types:
-   "TYPE_1": { "CASSETTE": 1999, "REJECTED": 1, "REMAINING": 2000, "DISPENSED": 0, "TOTAL": 2000 }
-4. Example Format for Denominations (BRI/SMBC):
-   "IDR_100K_RC2": { "INIT": 250, "DISP": 3251, "DEP": 3392, "REM": 358 }
-5. Global Fields: Extract general data like "document_category", "LAST_CLEARED_DATE", "MACHINE_ID", "ACTIVITY_COUNT", or "INIT_AMOUNT" at the root level of the JSON.
-6. Return ONLY a valid JSON object. No markdown, no conversational text.
+2. Nested Output: Structure tabular data hierarchically. Use Column Headers (or Cassette Types/Denominations) as primary keys, and row labels as secondary keys.
+3. Golden Template Adherence: Map the implicit matrix layout into the exact nested JSON structure defined in the Golden Templates.
+4. Global Fields: Extract general data like "document_category", "LAST_CLEARED_DATE", "MACHINE_ID", "ACTIVITY_COUNT", or "INIT_AMOUNT" at the root level of the JSON.
+5. Return ONLY a valid JSON object. No markdown, no conversational text.
+
+${goldenTemplatesPrompt}
 
 Identify the document type under "document_category" (e.g., "Cassette Audit & Cleared", "KTP (Indonesian ID)", "ATM Receipt", "Invoice", "Tax Document (NPWP)", "Passport", or "Unknown").
 
