@@ -26,7 +26,7 @@ App and REST API will be active at:
 The application communicates directly with NVIDIA's Vision-Language Model endpoint:
 - **Endpoint:** `https://integrate.api.nvidia.com/v1/chat/completions`
 - **Model:** `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`
-- **Authorization Header:** Hardcoded `Bearer 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`
+- **Authorization Header:** `Bearer <NVIDIA_API_KEY>`
 
 ---
 

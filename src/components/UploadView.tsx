@@ -41,7 +41,7 @@ export const UploadView: React.FC<UploadViewProps> = ({
     if (!files || files.length === 0 || !activeProject) return;
 
     setIsProcessing(true);
-    setStatusMessage('Invoking NVIDIA NIM OCR API & Extracting Receipt Bounding Boxes...');
+    setStatusMessage('Invoking NVIDIA Nemotron 30B VLM & Extracting Key-Value Pairs...');
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
@@ -122,9 +122,9 @@ export const UploadView: React.FC<UploadViewProps> = ({
       {/* Header Info */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
         <div>
-          <h2 className="text-xl font-bold tracking-tight uppercase">Receipt Ingestion & NVIDIA OCR</h2>
+          <h2 className="text-xl font-bold tracking-tight uppercase">Receipt Ingestion & NVIDIA Nemotron VLM</h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Upload thermal ATM receipts (JPG, PNG, PDF). NVIDIA NIM OCR API extracts raw text and spatial bounding boxes automatically.
+            Upload thermal ATM receipts (JPG, PNG, PDF). NVIDIA Nemotron 30B VLM extracts dynamic key-value transaction details automatically.
           </p>
         </div>
 

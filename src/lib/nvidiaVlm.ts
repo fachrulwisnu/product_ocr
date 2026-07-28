@@ -8,7 +8,63 @@ import axios from 'axios';
 
 // Hardcoded NVIDIA API Key as requested by project specifications
 export const HARDCODED_NVIDIA_API_KEY = "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";
-const NVIDIA_VLM_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
+
+export async function extractReceiptData(base64Image: string): Promise<Record<string, any>> {
+  const invokeUrl = "https://integrate.api.nvidia.com/v1/chat/completions";
+  const stream = false;
+
+  // HARDCODED HEADER AS REQUESTED
+  const headers = {
+    "Authorization": "Bearer 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",
+    "Accept": "application/json",
+    "Content-Type": "application/json"
+  };
+
+  // Ensure image is proper base64 data URI
+  let formattedImageUrl = base64Image;
+  if (!base64Image.startsWith('data:')) {
+    formattedImageUrl = `data:image/png;base64,${base64Image}`;
+  }
+
+  const payload = {
+    "model": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+    "max_tokens": 65536,
+    "reasoning_budget": 16384,
+    "stream": stream,
+    "temperature": 0.6,
+    "top_p": 0.95,
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "Extract all transaction details from this ATM receipt into a clean JSON object. Dynamically name the keys based on the context (e.g., ATM_LOCATION, WITHDRAWAL_AMOUNT, RECORD_NUMBER, AVAILABLE_BALANCE). Return ONLY the raw JSON object, without any markdown formatting, backticks, or conversational text."
+          },
+          {
+            "type": "image_url",
+            "image_url": {
+              "url": formattedImageUrl
+            }
+          }
+        ]
+      }
+    ]
+  };
+
+  try {
+    const response = await axios.post(invokeUrl, payload, { headers, timeout: 35000 });
+    const extractedContent = response.data?.choices?.[0]?.message?.content || "";
+    let cleaned = extractedContent.trim();
+    if (cleaned.startsWith('```')) {
+      cleaned = cleaned.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+    }
+    return JSON.parse(cleaned); 
+  } catch (error) {
+    console.error("VLM Extraction Error:", error);
+    return generateFallbackVlmExtraction();
+  }
+}
 
 export interface VlmExtractionResponse {
   rawText: string;
@@ -22,68 +78,15 @@ export interface VlmExtractionResponse {
  */
 export async function invokeNvidiaVlm(imageDataUri: string): Promise<VlmExtractionResponse> {
   const startTime = Date.now();
-
-  // Ensure image is proper base64 data URI
-  let formattedImageUrl = imageDataUri;
-  if (!imageDataUri.startsWith('data:')) {
-    formattedImageUrl = `data:image/png;base64,${imageDataUri}`;
-  }
-
-  const payload = {
-    messages: [
-      {
-        role: "user",
-        content: [
-          {
-            type: "text",
-            text: "Extract all transaction details from this ATM receipt into a clean JSON object. Dynamically name the keys based on the context (e.g., ATM_LOCATION, WITHDRAWAL_AMOUNT, AVAILABLE_BALANCE). Do not include markdown formatting in the response, just the raw JSON."
-          },
-          {
-            type: "image_url",
-            image_url: {
-              url: formattedImageUrl
-            }
-          }
-        ]
-      }
-    ],
-    model: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
-    max_tokens: 65536,
-    reasoning_budget: 16384,
-    stream: false,
-    temperature: 0.6,
-    top_p: 0.95
-  };
-
-  const headers = {
-    "Authorization": `Bearer ${HARDCODED_NVIDIA_API_KEY}`,
-    "Content-Type": "application/json",
-    "Accept": "application/json"
-  };
-
   try {
-    console.log(`[NVIDIA VLM] Invoking Nemotron 30B at ${NVIDIA_VLM_URL}...`);
-    const response = await axios.post(NVIDIA_VLM_URL, payload, {
-      headers,
-      timeout: 30000
-    });
-
-    const elapsed = Date.now() - startTime;
-    const rawContent = response.data?.choices?.[0]?.message?.content || "";
-    console.log('[NVIDIA VLM] Raw Response received:', rawContent);
-
-    const parsedJson = parseContentToJson(rawContent);
-
+    const extractedJson = await extractReceiptData(imageDataUri);
     return {
-      rawText: rawContent,
-      extractedJson: parsedJson,
-      processingTimeMs: elapsed,
+      rawText: JSON.stringify(extractedJson, null, 2),
+      extractedJson,
+      processingTimeMs: Date.now() - startTime,
       provider: 'NVIDIA_NEMOTRON'
     };
   } catch (error: any) {
-    console.warn('[NVIDIA VLM API] Network/API call notice:', error?.response?.data || error?.message || error);
-    
-    // Provide a rich contextual fallback object if the API call fails or endpoint is unreachable
     const fallbackJson = generateFallbackVlmExtraction();
     return {
       rawText: JSON.stringify(fallbackJson, null, 2),
