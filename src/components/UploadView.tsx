@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Project, ReceiptType } from '../types';
 import { generateReceiptSVG } from '../data/sampleReceipts';
+import { compressImageForVlm } from '../utils/imageCompressor';
 import { 
   Upload, 
   FileText, 
@@ -27,6 +28,7 @@ export const UploadView: React.FC<UploadViewProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState<ReceiptType>('ATM Cash Withdrawal');
 
   const receiptTypes: ReceiptType[] = [
@@ -41,34 +43,45 @@ export const UploadView: React.FC<UploadViewProps> = ({
     if (!files || files.length === 0 || !activeProject) return;
 
     setIsProcessing(true);
+    setErrorMessage(null);
     setStatusMessage('Invoking NVIDIA Nemotron 30B VLM & Extracting Key-Value Pairs...');
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       try {
-        const reader = new FileReader();
-        reader.onload = async (e) => {
-          const imageData = e.target?.result as string;
-          
-          const response = await fetch('/api/upload', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              projectId: activeProject.id,
-              fileName: file.name,
-              receiptType: selectedType,
-              imageData
-            })
-          });
+        const rawBase64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target?.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
 
-          if (response.ok) {
-            const data = await response.json();
-            onUploadSuccess(data);
-          }
-        };
-        reader.readAsDataURL(file);
-      } catch (err) {
+        // Task 3: Compress image to max 1024px JPEG at 0.8 quality
+        setStatusMessage(`Compressing & Sending ${file.name} to Nemotron VLM...`);
+        const compressedImageData = await compressImageForVlm(rawBase64, 1024, 0.8);
+
+        const response = await fetch('/api/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId: activeProject.id,
+            fileName: file.name,
+            receiptType: selectedType,
+            imageData: compressedImageData
+          })
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          onUploadSuccess(data);
+        } else {
+          const errData = await response.json().catch(() => ({ message: 'VLM API request failed or timed out' }));
+          console.error('Upload failed:', errData);
+          setErrorMessage(`Extraction Failed: ${errData.message || 'VLM API error'}`);
+        }
+      } catch (err: any) {
         console.error('Upload failed:', err);
+        setErrorMessage(`Upload Error: ${err.message || 'Failed to process file'}`);
       }
     }
 
@@ -187,7 +200,12 @@ export const UploadView: React.FC<UploadViewProps> = ({
             </p>
           </div>
 
-          {statusMessage ? (
+          {errorMessage ? (
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded text-xs bg-rose-500/10 text-rose-600 dark:text-rose-400 font-mono font-bold uppercase tracking-wider">
+              <AlertCircle className="w-4 h-4" />
+              {errorMessage}
+            </div>
+          ) : statusMessage ? (
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded text-xs bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-mono font-bold uppercase tracking-wider">
               <Sparkles className="w-4 h-4 animate-spin" />
               {statusMessage}

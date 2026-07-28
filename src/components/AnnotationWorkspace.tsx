@@ -30,6 +30,16 @@ interface AnnotationWorkspaceProps {
   isDarkMode: boolean;
 }
 
+interface VisualBBox {
+  id: string;
+  text: string;
+  confidence: number;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
 export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
   images,
   selectedImage,
@@ -62,8 +72,59 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
 
+  // Dual-Engine Client-Side Visual Bounding Boxes (Tesseract.js)
+  const [tesseractBoxes, setTesseractBoxes] = useState<VisualBBox[]>([]);
+  const [isOcrRunning, setIsOcrRunning] = useState(false);
+  const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number }>({ width: 800, height: 1200 });
+  const [hoveredFieldValue, setHoveredFieldValue] = useState<string | null>(null);
+  const [hoveredFieldKey, setHoveredFieldKey] = useState<string | null>(null);
+
   const imgRef = useRef<HTMLImageElement>(null);
   const imageContainerRef = useRef<HTMLDivElement>(null);
+
+  // Run Tesseract.js in background for client-side visual bounding boxes overlay
+  useEffect(() => {
+    if (!currentImage?.fileUrl) return;
+
+    let isMounted = true;
+    setIsOcrRunning(true);
+
+    const img = new Image();
+    img.src = currentImage.fileUrl;
+    img.onload = () => {
+      if (isMounted) {
+        setImageDimensions({ width: img.naturalWidth || 800, height: img.naturalHeight || 1200 });
+      }
+    };
+
+    import('tesseract.js').then((Tesseract) => {
+      Tesseract.recognize(currentImage.fileUrl, 'eng', { logger: () => {} })
+        .then(({ data }) => {
+          if (!isMounted) return;
+          const wordsList = (data as any).words || (data as any).lines || [];
+          const boxes: VisualBBox[] = wordsList.map((w: any, idx: number) => ({
+            id: `tess-${idx}-${Date.now()}`,
+            text: (w.text || '').trim(),
+            confidence: Math.round(w.confidence || 0) / 100,
+            x0: w.bbox?.x0 || 0,
+            y0: w.bbox?.y0 || 0,
+            x1: w.bbox?.x1 || 0,
+            y1: w.bbox?.y1 || 0
+          })).filter((b: VisualBBox) => b.text.length > 0);
+
+          setTesseractBoxes(boxes);
+          setIsOcrRunning(false);
+        })
+        .catch(err => {
+          console.warn('Client-side Tesseract OCR failed:', err);
+          if (isMounted) setIsOcrRunning(false);
+        });
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentImage?.id, currentImage?.fileUrl]);
 
   // Sync state & fetch Few-Shot Examples when selected image changes
   useEffect(() => {
@@ -72,7 +133,6 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
       setSaveError(null);
       setSaveNotification(null);
 
-      // Load 3-5 verified examples from Supabase few_shot_library
       fetchFewShotExamples(selectedImage.projectId, 5)
         .then(examples => {
           setFewShotExamples(examples);
@@ -424,7 +484,7 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
             </div>
           </div>
 
-          {/* Canvas Image Display with Drag-to-Select Google Lens Crop Overlay */}
+          {/* Canvas Image Display with Drag-to-Select Google Lens Crop & Tesseract Bounding Boxes */}
           <div 
             ref={imageContainerRef}
             className="flex-1 overflow-auto p-8 flex items-center justify-center relative select-none bg-slate-300 dark:bg-slate-950 cursor-crosshair"
@@ -447,6 +507,53 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
                 draggable={false}
               />
 
+              {/* Client-Side Visual Bounding Boxes (Tesseract.js Dual-Engine) */}
+              {tesseractBoxes.map((box) => {
+                const leftPct = (box.x0 / imageDimensions.width) * 100;
+                const topPct = (box.y0 / imageDimensions.height) * 100;
+                const widthPct = Math.max(1, ((box.x1 - box.x0) / imageDimensions.width) * 100);
+                const heightPct = Math.max(1, ((box.y1 - box.y0) / imageDimensions.height) * 100);
+
+                const cleanBoxText = box.text.toLowerCase().replace(/[^a-z0-9]/g, '');
+                const cleanHoverVal = (hoveredFieldValue || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                const cleanHoverKey = (hoveredFieldKey || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+                const isMatched = (
+                  cleanBoxText.length > 0 && (
+                    (cleanHoverVal.length > 0 && (cleanHoverVal.includes(cleanBoxText) || cleanBoxText.includes(cleanHoverVal))) ||
+                    (cleanHoverKey.length > 0 && (cleanHoverKey.includes(cleanBoxText) || cleanBoxText.includes(cleanHoverKey)))
+                  )
+                );
+
+                return (
+                  <div
+                    key={box.id}
+                    className={`absolute transition-all duration-150 pointer-events-auto rounded-xs ${
+                      isMatched
+                        ? 'border-2 border-emerald-400 bg-emerald-400/30 shadow-lg shadow-emerald-500/50 z-30 ring-2 ring-emerald-400/60 scale-105 animate-pulse'
+                        : 'border-2 border-blue-600 bg-blue-600/10 hover:border-blue-400 hover:bg-blue-500/20 z-10'
+                    }`}
+                    style={{
+                      left: `${leftPct}%`,
+                      top: `${topPct}%`,
+                      width: `${widthPct}%`,
+                      height: `${heightPct}%`
+                    }}
+                    title={`Text: ${box.text} (Confidence: ${(box.confidence * 100).toFixed(0)}%)`}
+                  >
+                    <span
+                      className={`absolute -top-4 left-0 text-[8px] font-mono px-1 py-0.2 rounded whitespace-nowrap shadow-xs pointer-events-none ${
+                        isMatched
+                          ? 'bg-emerald-500 text-white font-extrabold z-40'
+                          : 'bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-300 border border-blue-400 dark:border-blue-600 font-bold'
+                      }`}
+                    >
+                      [{box.text}] {box.confidence.toFixed(2)}
+                    </span>
+                  </div>
+                );
+              })}
+
               {/* Bounding Box Selection Drag Overlay */}
               {dragRect && (
                 <div 
@@ -467,10 +574,19 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
           </div>
 
           <div className="p-2.5 bg-slate-900 text-slate-400 text-[10px] font-mono flex items-center justify-between border-t border-slate-800 px-4">
-            <span className="flex items-center gap-1">
-              <Crop className="w-3 h-3 text-indigo-400" /> Google Lens Mode: Click & drag over any text region to crop & extract
+            <span className="flex items-center gap-1.5">
+              <Crop className="w-3 h-3 text-indigo-400" /> Google Lens Mode: Drag crop box
+              {isOcrRunning ? (
+                <span className="text-amber-400 flex items-center gap-1 ml-2">
+                  <Loader2 className="w-3 h-3 animate-spin" /> Scanning Visual Layer...
+                </span>
+              ) : (
+                <span className="text-blue-400 ml-2">
+                  • {tesseractBoxes.length} Visual BBoxes Rendered (Tesseract OCR)
+                </span>
+              )}
             </span>
-            <span className="text-indigo-300">NVIDIA Nemotron 30B VLM</span>
+            <span className="text-indigo-300">Dual-Engine (VLM + Client OCR)</span>
           </div>
         </div>
 
@@ -486,7 +602,7 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
                 <Tag className="w-3.5 h-3.5 text-indigo-500" /> Dynamic Field Studio
               </h2>
               <p className="text-[10px] text-slate-500 mt-0.5">
-                Dynamic VLM key-value extractions. Edit keys & values freely.
+                Hover over any field to highlight its bounding box on the left canvas.
               </p>
             </div>
 
@@ -509,8 +625,18 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
               fieldsState.map((field) => (
                 <div
                   key={field.id}
+                  onMouseEnter={() => {
+                    setHoveredFieldValue(field.value);
+                    setHoveredFieldKey(field.key);
+                  }}
+                  onMouseLeave={() => {
+                    setHoveredFieldValue(null);
+                    setHoveredFieldKey(null);
+                  }}
                   className={`p-3 rounded border space-y-2 transition-all ${
-                    field.category === 'google_lens_crop' 
+                    hoveredFieldKey === field.key || (hoveredFieldValue === field.value && field.value)
+                      ? 'border-emerald-500 bg-emerald-500/10 dark:bg-emerald-950/30 ring-1 ring-emerald-500/50'
+                      : field.category === 'google_lens_crop' 
                       ? 'border-indigo-500/50 bg-indigo-950/20 dark:bg-indigo-950/40'
                       : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 hover:border-slate-300'
                   }`}

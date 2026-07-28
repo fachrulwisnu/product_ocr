@@ -66,7 +66,7 @@ export async function extractFullReceipt(
   };
 
   try {
-    const response = await axios.post(invokeUrl, payload, { headers, timeout: 35000 });
+    const response = await axios.post(invokeUrl, payload, { headers, timeout: 30000 });
     const extractedContent = response.data?.choices?.[0]?.message?.content || "";
     let cleaned = extractedContent.trim();
     if (cleaned.startsWith('```')) {
@@ -75,7 +75,7 @@ export async function extractFullReceipt(
     return JSON.parse(cleaned); 
   } catch (error) {
     console.error("VLM Extraction Error:", error);
-    return generateFallbackVlmExtraction();
+    throw error;
   }
 }
 
@@ -160,13 +160,8 @@ export async function invokeNvidiaVlm(imageDataUri: string): Promise<VlmExtracti
       provider: 'NVIDIA_NEMOTRON'
     };
   } catch (error: any) {
-    const fallbackJson = generateFallbackVlmExtraction();
-    return {
-      rawText: JSON.stringify(fallbackJson, null, 2),
-      extractedJson: fallbackJson,
-      processingTimeMs: Date.now() - startTime,
-      provider: 'NVIDIA_NEMOTRON_FALLBACK'
-    };
+    console.error('[NVIDIA VLM] Failed or timed out:', error?.message);
+    throw error;
   }
 }
 

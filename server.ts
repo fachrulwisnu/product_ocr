@@ -207,7 +207,7 @@ app.post('/api/upload', async (req, res) => {
     });
   } catch (err: any) {
     console.error('Error in /api/upload:', err);
-    res.status(500).json({ error: err.message || 'Failed to process receipt upload and VLM extraction' });
+    return res.status(500).json({ success: false, message: err?.message || 'Failed to process receipt upload and VLM extraction' });
   }
 });
 
@@ -216,7 +216,7 @@ app.post('/api/vlm', async (req, res) => {
   try {
     const { image } = req.body;
     if (!image) {
-      return res.status(400).json({ error: 'image base64 or data URI is required' });
+      return res.status(400).json({ success: false, message: 'image base64 or data URI is required' });
     }
 
     console.log('[API /api/vlm] Executing NVIDIA Nemotron 30B VLM completion...');
@@ -224,21 +224,21 @@ app.post('/api/vlm', async (req, res) => {
     res.json(result);
   } catch (err: any) {
     console.error('Error in /api/vlm:', err);
-    res.status(500).json({ error: err.message || 'VLM completion failed' });
+    return res.status(500).json({ success: false, message: err?.message || 'VLM completion failed' });
   }
 });
 
-// 6. Direct VLM Test Route (renamed from legacy ocr)
+// 6. Direct VLM Test Route
 app.post('/api/ocr', async (req, res) => {
   try {
     const { image } = req.body;
     if (!image) {
-      return res.status(400).json({ error: 'image base64 or SVG data is required' });
+      return res.status(400).json({ success: false, message: 'image base64 or SVG data is required' });
     }
     const result = await invokeNvidiaVlm(image);
     res.json(result);
   } catch (err: any) {
-    res.status(500).json({ error: err.message || 'VLM extraction failed' });
+    return res.status(500).json({ success: false, message: err?.message || 'VLM extraction failed' });
   }
 });
 
