@@ -5,14 +5,14 @@
  */
 
 import axios from 'axios';
-import { getGoldenTemplatesPrompt } from './goldenTemplates';
+import { GOLDEN_TEMPLATES, getGoldenTemplatesPrompt } from './goldenTemplates';
 
 // Hardcoded NVIDIA API Key as requested by project specifications
 export const HARDCODED_NVIDIA_API_KEY = "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";
 
 export async function extractReceiptData(
   base64Image: string, 
-  documentType: string = "ATM Cash Withdrawal",
+  documentCategory: string = "ATM Cash Withdrawal",
   modelId: string = "meta/llama-3.2-90b-vision-instruct",
   fewShotExamples: Record<string, any>[] = []
 ): Promise<Record<string, any>> {
@@ -21,52 +21,119 @@ export async function extractReceiptData(
   const fullDataUrl = `data:image/jpeg;base64,${base64DataOnly}`;
 
   // ---------------------------------------------------------
-  // ROUTE A: NEMOTRON OCR V2 (COMPUTER VISION API)
+  // ROUTE A: NEMOTRON OCR V2 (HYBRID PIPELINE)
   // ---------------------------------------------------------
   if (modelId === 'nvidia/nemotron-ocr-v2') {
-    const invokeUrl = "https://ai.api.nvidia.com/v1/cv/nvidia/nemotron-ocr-v2";
+    const ocrUrl = "https://ai.api.nvidia.com/v1/cv/nvidia/nemotron-ocr-v2";
+    const ocrHeaders = {
+      "Authorization": "Bearer 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",
+      "Accept": "application/json",
+      "Content-Type": "application/json"
+    };
+
+    const payload = { input: [ { type: "image_url", url: fullDataUrl } ] };
+
+    try {
+      const response = await axios.post(ocrUrl, payload, { headers: ocrHeaders, timeout: 90000 });
+      const rawData = response.data;
+      
+      const cleanedData: Record<string, string> = {};
+      const extractedTextLines: string[] = [];
+
+      if (rawData?.data && Array.isArray(rawData.data)) {
+        rawData.data.forEach((page: any) => {
+          if (page?.text_detections && Array.isArray(page.text_detections)) {
+            page.text_detections.forEach((detection: any, index: number) => {
+              const textValue = detection?.text_prediction?.text;
+              if (textValue) {
+                cleanedData[`LINE_${index + 1}`] = textValue.trim();
+                extractedTextLines.push(textValue.trim());
+              }
+            });
+          }
+        });
+      }
+
+      if (GOLDEN_TEMPLATES[documentCategory] && extractedTextLines.length > 0) {
+        const chatUrl = "https://integrate.api.nvidia.com/v1/chat/completions";
+        const chatHeaders = {
+          "Authorization": "Bearer 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",
+          "Accept": "application/json",
+          "Content-Type": "application/json"
+        };
+
+        const formattingPrompt = `You are an OCR data formatter. Format the following raw OCR text lines into a clean JSON object. STRICT SCHEMA RULE: ${GOLDEN_TEMPLATES[documentCategory]}. Return ONLY raw JSON without markdown formatting.`;
+
+        const formatPayload = {
+          model: "meta/llama-3.1-70b-instruct",
+          messages: [
+            { role: "system", content: formattingPrompt },
+            { role: "user", content: extractedTextLines.join('\n') }
+          ],
+          temperature: 0.1,
+          max_tokens: 2048
+        };
+
+        const formatResponse = await axios.post(chatUrl, formatPayload, { headers: chatHeaders, timeout: 30000 });
+        const structuredText = formatResponse.data.choices[0].message.content;
+        return JSON.parse(structuredText.replace(/```json/g, '').replace(/```/g, '').trim());
+      }
+
+      return cleanedData; 
+    } catch (error) {
+      console.error("Nemotron OCR v2 Hybrid Error:", error);
+      throw error;
+    }
+  }
+
+  // ---------------------------------------------------------
+  // ROUTE B: NEMOTRON NANO VL 8B (DOCUMENTS, INVOICES, PDF, XLSX, CSV)
+  // ---------------------------------------------------------
+  else if (modelId === 'nvidia/llama-3.1-nemotron-nano-vl-8b-v1') {
+    const invokeUrl = "https://integrate.api.nvidia.com/v1/chat/completions";
     const headers = {
       "Authorization": "Bearer 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",
       "Accept": "application/json",
       "Content-Type": "application/json"
     };
 
-    if (base64DataOnly.length > 180000) {
-      console.warn("Base64 string exceeds 180k characters. Consider compressing the image in the frontend.");
+    let systemPrompt = `You are an expert document and invoice processing engine. Extract all line items, totals, dates, and metadata from this ${documentCategory} into a clean JSON object. Return ONLY the raw JSON object without markdown formatting.`;
+
+    if (GOLDEN_TEMPLATES[documentCategory]) {
+      systemPrompt = `${systemPrompt} STRICT SCHEMA RULE:${GOLDEN_TEMPLATES[documentCategory]}`;
     }
 
     const payload = {
-      input: [
-        {
-          type: "image_url",
-          url: fullDataUrl
+      model: "nvidia/llama-3.1-nemotron-nano-vl-8b-v1",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { 
+          role: "user", 
+          content: [
+            { type: "text", text: "Extract structured data from this document/invoice." },
+            { type: "image_url", image_url: { url: fullDataUrl } }
+          ] 
         }
-      ]
+      ],
+      temperature: 1,
+      top_p: 0.01,
+      max_tokens: 1024,
+      seed: 50,
+      stream: false
     };
 
     try {
       const response = await axios.post(invokeUrl, payload, { headers, timeout: 90000 });
-      const resData = response.data;
-      if (typeof resData === 'string') {
-        return parseContentToJson(resData);
-      } else if (resData && typeof resData === 'object') {
-        if (resData.choices?.[0]?.message?.content) {
-          return parseContentToJson(resData.choices[0].message.content);
-        }
-        if (typeof resData.text === 'string') {
-          return parseContentToJson(resData.text);
-        }
-        return resData;
-      }
-      return resData;
+      const extractedText = response.data.choices[0].message.content;
+      return JSON.parse(extractedText.replace(/```json/g, '').replace(/```/g, '').trim());
     } catch (error) {
-      console.error("Nemotron OCR v2 Error:", error);
+      console.error("Nemotron Nano VL 8B Error:", error);
       throw error;
     }
-  } 
+  }
 
   // ---------------------------------------------------------
-  // ROUTE B: LLAMA 3.2 & NEMOTRON OMNI (CHAT COMPLETIONS API)
+  // ROUTE C: LLAMA 3.2 & NEMOTRON OMNI (CHAT COMPLETIONS)
   // ---------------------------------------------------------
   else {
     const invokeUrl = "https://integrate.api.nvidia.com/v1/chat/completions";
@@ -76,107 +143,30 @@ export async function extractReceiptData(
       "Content-Type": "application/json"
     };
 
-    // Detect bank code from documentType if present
-    let matchedBankCode: string | undefined = undefined;
-    const docTypeUpper = (documentType || "").toUpperCase();
-    for (const code of ['MNC', 'PERMATA', 'OCBC', 'BRI', 'SMBC', 'BCA']) {
-      if (docTypeUpper.includes(code)) {
-        matchedBankCode = code;
-        break;
-      }
+    let systemPrompt = `Extract transaction details from this ${documentCategory} into a clean JSON object. Return ONLY raw JSON.`;
+
+    if (GOLDEN_TEMPLATES[documentCategory]) {
+      systemPrompt = `${systemPrompt} STRICT SCHEMA RULE:${GOLDEN_TEMPLATES[documentCategory]}`;
     }
 
-    const goldenTemplatesPrompt = getGoldenTemplatesPrompt(matchedBankCode);
-
-    const systemPrompt = `You are an expert OCR Data Engineer parsing Indonesian Cassette Audit receipts and documents.
-Your primary directive is to map the unstructured text into the exact nested JSON schema provided in the Golden Templates below.
-If the receipt is heavily folded or faded, use the Golden Template to infer the missing structural keys (e.g., if 'REMAINING' is unreadable but the number aligns with the 3rd row of TYPE_1, map it to TYPE_1.REMAINING).
-
-CRITICAL INSTRUCTIONS:
-1. Spatial Alignment: Read line by line. Carefully trace the vertical alignment of numbers to their correct header columns.
-2. Nested Output: Structure tabular data hierarchically. Use Column Headers (or Cassette Types/Denominations) as primary keys, and row labels as secondary keys.
-3. Golden Template Adherence: Map the implicit matrix layout into the exact nested JSON structure defined in the Golden Templates.
-4. Global Fields: Extract general data like "document_category", "LAST_CLEARED_DATE", "MACHINE_ID", "ACTIVITY_COUNT", or "INIT_AMOUNT" at the root level of the JSON.
-5. Return ONLY a valid JSON object. No markdown, no conversational text.
-
-${goldenTemplatesPrompt}
-
-Identify the document type under "document_category" (e.g., "Cassette Audit & Cleared", "KTP (Indonesian ID)", "ATM Receipt", "Invoice", "Tax Document (NPWP)", "Passport", or "Unknown").
-
-Return strictly in this JSON format:
-{
-  "document_category": "${documentType || "ATM Receipt"}",
-  "extracted_data": {
-     // ... extracted key-values and nested objects here
-  }
-}`;
-
-    const fewShotContext = (fewShotExamples && fewShotExamples.length > 0)
-      ? `\n\nHere are historical verified examples of similar receipts to guide your formatting (Instant Learning):\n${JSON.stringify(fewShotExamples.slice(0, 5), null, 2)}`
-      : "";
-
-    const finalPromptText = `${systemPrompt}\n\n${fewShotContext}`;
-
-    const chosenModel = modelId || "meta/llama-3.2-90b-vision-instruct";
-
-    const messages = [
-      {
-        "role": "user",
-        "content": [
-          {
-            "type": "text",
-            "text": finalPromptText
-          },
-          {
-            "type": "image_url",
-            "image_url": {
-              "url": fullDataUrl
-            }
-          }
-        ]
-      }
-    ];
-
-    // Dynamically build payload based on the selected model
     let payload: any = {
-      model: chosenModel,
-      messages: messages,
+      model: modelId,
+      messages: [
+        { role: "user", content: [ { type: "text", text: systemPrompt }, { type: "image_url", image_url: { url: fullDataUrl } } ] }
+      ],
       stream: false,
     };
 
-    if (chosenModel === 'meta/llama-3.2-90b-vision-instruct') {
-      payload = {
-        ...payload,
-        frequency_penalty: 0,
-        max_tokens: 4096,
-        presence_penalty: 0,
-        temperature: 0.1,
-        top_p: 1
-      };
-    } else if (chosenModel === 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning') {
-      payload = {
-        ...payload,
-        max_tokens: 65536,
-        reasoning_budget: 16384,
-        temperature: 0.6,
-        top_p: 0.95
-      };
+    if (modelId === 'meta/llama-3.2-90b-vision-instruct') {
+      payload = { ...payload, max_tokens: 4096, temperature: 0.1, top_p: 1 };
     } else {
-      payload = {
-        ...payload,
-        max_tokens: 4096,
-        temperature: 0.7
-      };
+      payload = { ...payload, max_tokens: 65536, reasoning_budget: 16384, temperature: 0.6, top_p: 0.95 };
     }
 
     try {
-      const response = await axios.post(invokeUrl, payload, {
-        headers: headers,
-        timeout: 90000
-      });
-      
-      const extractedContent = response.data?.choices?.[0]?.message?.content || "";
-      return parseContentToJson(extractedContent);
+      const response = await axios.post(invokeUrl, payload, { headers, timeout: 90000 });
+      const extractedText = response.data.choices[0].message.content;
+      return JSON.parse(extractedText.replace(/```json/g, '').replace(/```/g, '').trim());
     } catch (error) {
       console.error("Chat Completions API Error:", error);
       throw error;

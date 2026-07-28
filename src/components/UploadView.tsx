@@ -169,6 +169,9 @@ export const UploadView: React.FC<UploadViewProps> = ({
             <option value="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning">
               Nemotron 3 Omni - Fast Reasoning
             </option>
+            <option value="nvidia/llama-3.1-nemotron-nano-vl-8b-v1">
+              Nemotron Nano VL 8B - Document & Invoice Specialized
+            </option>
           </select>
         </div>
 
