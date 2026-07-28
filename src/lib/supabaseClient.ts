@@ -1,25 +1,34 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-// Read Supabase config from environment variables
-const envObj = (import.meta as any)?.env || {};
-const supabaseUrl = envObj.VITE_SUPABASE_URL || (typeof process !== 'undefined' ? process.env?.SUPABASE_URL || process.env?.VITE_SUPABASE_URL : '') || '';
-const supabaseKey = envObj.VITE_SUPABASE_ANON_KEY || (typeof process !== 'undefined' ? process.env?.SUPABASE_ANON_KEY || process.env?.VITE_SUPABASE_ANON_KEY : '') || '';
+// Read Supabase config from Vite environment variables with process.env fallbacks
+const metaEnv = (import.meta as any).env || {};
+const supabaseUrl = metaEnv.VITE_SUPABASE_URL || (typeof process !== 'undefined' ? process.env?.VITE_SUPABASE_URL || process.env?.SUPABASE_URL : '') || '';
+const supabaseAnonKey = metaEnv.VITE_SUPABASE_ANON_KEY || (typeof process !== 'undefined' ? process.env?.VITE_SUPABASE_ANON_KEY || process.env?.SUPABASE_ANON_KEY : '') || '';
 
-let supabaseInstance: SupabaseClient | null = null;
-
-export function getSupabase(): SupabaseClient | null {
-  if (!supabaseInstance && supabaseUrl && supabaseKey && supabaseUrl.startsWith('http')) {
-    try {
-      supabaseInstance = createClient(supabaseUrl, supabaseKey);
-    } catch (err) {
-      console.warn('Failed to initialize Supabase client:', err);
-    }
-  }
-  return supabaseInstance;
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error("Missing Supabase environment variables. Make sure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are set in your .env file and restart the Vite server.");
 }
 
+// Create and export the Supabase client instance directly
+export const supabase: SupabaseClient = createClient(
+  supabaseUrl || 'http://placeholder-url.com', // Prevent immediate crash if env is momentarily missing during build
+  supabaseAnonKey || 'placeholder-key'
+);
+
 export function isSupabaseConfigured(): boolean {
-  return Boolean(supabaseUrl && supabaseKey && supabaseUrl.startsWith('http'));
+  return Boolean(
+    supabaseUrl && 
+    supabaseAnonKey && 
+    supabaseUrl.startsWith('http') && 
+    !supabaseUrl.includes('placeholder-url.com')
+  );
+}
+
+export function getSupabase(): SupabaseClient | null {
+  if (isSupabaseConfigured()) {
+    return supabase;
+  }
+  return null;
 }
 
 // ----------------------------------------------------
