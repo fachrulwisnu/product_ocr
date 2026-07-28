@@ -632,16 +632,15 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
           {/* Canvas Image Display with Drag-to-Select Google Lens Crop & Tesseract Bounding Boxes */}
           <div 
             ref={imageContainerRef}
-            className="flex-1 overflow-auto p-8 flex items-center justify-center relative select-none bg-slate-300 dark:bg-slate-950 cursor-crosshair"
+            className="flex-1 overflow-auto p-6 flex items-center justify-center relative select-none bg-slate-900 cursor-crosshair"
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
           >
             <div 
-              className="relative inline-block transition-transform duration-200 origin-center"
+              className="relative inline-block max-w-full max-h-full transition-transform duration-200 origin-center"
               style={{
-                transform: `scale(${zoomLevel}) rotate(${rotation}deg)`,
-                maxWidth: '480px'
+                transform: `scale(${zoomLevel}) rotate(${rotation}deg)`
               }}
             >
               <img
@@ -655,7 +654,7 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
                     setImageNaturalHeight(img.naturalHeight);
                   }
                 }}
-                className="w-full h-auto rounded-none shadow-2xl border border-slate-300 dark:border-slate-700 pointer-events-none select-none block"
+                className="block max-w-full max-h-full object-contain rounded-none shadow-2xl border border-slate-700 pointer-events-none select-none"
                 draggable={false}
               />
 
@@ -679,38 +678,36 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
 
                 const isMatched = box.isVlmMatch;
 
+                // Only render matched VLM boxes or currently hovered boxes to keep image clean
+                if (!isMatched && !isHovered) return null;
+
                 return (
                   <div
                     key={box.id}
                     style={{
                       position: 'absolute',
-                      left: `${leftPct}%`,
                       top: `${topPct}%`,
+                      left: `${leftPct}%`,
                       width: `${widthPct}%`,
                       height: `${heightPct}%`,
-                      zIndex: isHovered ? 30 : (isMatched ? 20 : 10),
+                      boxSizing: 'border-box',
+                      zIndex: isHovered ? 30 : 20,
                     }}
-                    className={`transition-all duration-150 pointer-events-auto rounded-none ${
+                    className={`border-2 pointer-events-none rounded-none transition-all duration-150 ${
                       isHovered
-                        ? 'border-2 border-emerald-400 bg-emerald-400/35 shadow-lg shadow-emerald-500/50 ring-2 ring-emerald-400/60 scale-105 animate-pulse'
-                        : isMatched
-                          ? 'border-2 border-blue-600 bg-blue-600/25 hover:border-blue-400 hover:bg-blue-500/35'
-                          : 'border-2 border-blue-600 bg-blue-600/15 hover:border-blue-400 hover:bg-blue-500/25'
+                        ? 'border-emerald-400 bg-emerald-400/30 shadow-lg shadow-emerald-500/50 ring-2 ring-emerald-400/60 animate-pulse'
+                        : 'border-indigo-500 bg-indigo-500/10'
                     }`}
-                    title={`${box.matchedKey ? `[${box.matchedKey}] ` : ''}${box.text} (Confidence: ${(box.confidence * 100).toFixed(0)}%)`}
                   >
-                    <span
-                      style={{ top: '-1.25rem' }}
-                      className={`absolute left-0 text-[8px] font-mono px-1 py-0.5 rounded-none whitespace-nowrap shadow-xs pointer-events-none ${
+                    <div
+                      className={`absolute bottom-full left-0 mb-1 whitespace-nowrap text-[10px] font-mono px-1.5 py-0.5 rounded shadow-xs pointer-events-none font-bold uppercase tracking-wider ${
                         isHovered
                           ? 'bg-emerald-500 text-white font-extrabold z-40'
-                          : isMatched
-                            ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 border border-slate-700 font-extrabold z-30'
-                            : 'bg-blue-600 text-white font-bold'
+                          : 'bg-indigo-600 text-white font-bold z-30'
                       }`}
                     >
                       {box.matchedKey ? `${box.matchedKey}: ` : ''}{box.text}
-                    </span>
+                    </div>
                   </div>
                 );
               })}
