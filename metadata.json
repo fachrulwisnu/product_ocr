@@ -1,0 +1,6 @@
+{
+  "name": "ATM Receipt OCR Annotation Platform",
+  "description": "Nanonets-inspired OCR Annotation & Instant Learning Platform for ATM receipt extraction powered by NVIDIA NIM OCR API and AI extraction models.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
