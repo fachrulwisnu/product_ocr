@@ -11,7 +11,8 @@ export const HARDCODED_NVIDIA_API_KEY = "nvapi-Ksost2MWzg5tpSEnQv8Yq_OzzDbJcMAh3
 
 export async function extractFullReceipt(
   base64Image: string, 
-  fewShotExamples: Record<string, any>[] = []
+  fewShotExamples: Record<string, any>[] = [],
+  documentType: string = "ATM Cash Withdrawal"
 ): Promise<Record<string, any>> {
   const invokeUrl = "https://integrate.api.nvidia.com/v1/chat/completions";
   const stream = false;
@@ -29,7 +30,8 @@ export async function extractFullReceipt(
     formattedImageUrl = `data:image/png;base64,${base64Image}`;
   }
 
-  let promptText = "Extract all transaction details from this ATM receipt into a clean JSON object. Dynamically name the keys based on the context (e.g., ATM_LOCATION, WITHDRAWAL_AMOUNT, RECORD_NUMBER, AVAILABLE_BALANCE). Return ONLY the raw JSON object, without any markdown formatting, backticks, or conversational text.";
+  const docCategory = documentType || "Document";
+  let promptText = `Extract all relevant details from this ${docCategory} into a clean JSON object. Dynamically name the keys based on the context of a ${docCategory}. Return ONLY the raw JSON object, without any markdown formatting, backticks, or conversational text.`;
 
   if (fewShotExamples && fewShotExamples.length > 0) {
     promptText += "\n\nHere are verified examples of expected key-value extraction structure for this project format:\n";
@@ -135,8 +137,11 @@ export async function extractCroppedRegion(croppedBase64: string): Promise<strin
   }
 }
 
-export async function extractReceiptData(base64Image: string): Promise<Record<string, any>> {
-  return extractFullReceipt(base64Image, []);
+export async function extractReceiptData(
+  base64Image: string, 
+  documentType: string = "ATM Cash Withdrawal"
+): Promise<Record<string, any>> {
+  return extractFullReceipt(base64Image, [], documentType);
 }
 
 export interface VlmExtractionResponse {
@@ -147,12 +152,15 @@ export interface VlmExtractionResponse {
 }
 
 /**
- * Invoke NVIDIA Nemotron VLM to extract dynamic key-value pairs from an ATM receipt image.
+ * Invoke NVIDIA Nemotron VLM to extract dynamic key-value pairs from any document image.
  */
-export async function invokeNvidiaVlm(imageDataUri: string): Promise<VlmExtractionResponse> {
+export async function invokeNvidiaVlm(
+  imageDataUri: string, 
+  documentType: string = "ATM Cash Withdrawal"
+): Promise<VlmExtractionResponse> {
   const startTime = Date.now();
   try {
-    const extractedJson = await extractReceiptData(imageDataUri);
+    const extractedJson = await extractReceiptData(imageDataUri, documentType);
     return {
       rawText: JSON.stringify(extractedJson, null, 2),
       extractedJson,

@@ -66,6 +66,10 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
   const [fewShotExamples, setFewShotExamples] = useState<Record<string, any>[]>([]);
   const [isReExtractingVlm, setIsReExtractingVlm] = useState(false);
 
+  // Ref map for input focus management on cropped fields
+  const keyInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const [focusedFieldId, setFocusedFieldId] = useState<string | null>(null);
+
   // Google Lens Drag-to-Crop State
   const [isCroppingVlm, setIsCroppingVlm] = useState(false);
   const [dragRect, setDragRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
@@ -288,7 +292,7 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
     }
     setIsDragging(false);
 
-    // If drag area is larger than 10x10 px, crop and invoke VLM
+    // If drag area is larger than 10x10 px, crop and extract text
     if (dragRect.width > 10 && dragRect.height > 10) {
       const img = imgRef.current;
       const scaleX = img.naturalWidth / img.clientWidth;
@@ -296,8 +300,8 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
 
       const sx = dragRect.x * scaleX;
       const sy = dragRect.y * scaleY;
-      const sw = dragRect.width * scaleX;
-      const sh = dragRect.height * scaleY;
+      const sw = Math.max(1, dragRect.width * scaleX);
+      const sh = Math.max(1, dragRect.height * scaleY);
 
       const canvas = document.createElement('canvas');
       canvas.width = sw;
@@ -306,34 +310,62 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
 
       if (ctx) {
         ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
-        const croppedBase64 = canvas.toDataURL('image/png');
+        const croppedBase64 = canvas.toDataURL('image/jpeg', 0.8);
 
         setIsCroppingVlm(true);
-        try {
-          const extractedCropValue = await extractCroppedRegion(croppedBase64);
-          
-          // Auto-add new row to Dynamic Field Studio: empty Key, pre-filled Value
+
+        // Determine target field ID (focused row or auto-create new row)
+        let targetId = focusedFieldId;
+        const exists = targetId && fieldsState.some(f => f.id === targetId);
+
+        if (exists && targetId) {
+          setFieldsState(prev => prev.map(f => f.id === targetId ? { ...f, value: 'Extracting...', status: 'edited' } : f));
+        } else {
+          targetId = `field-crop-${Date.now()}`;
           const newCroppedField: ExtractedField = {
-            id: `field-crop-${Date.now()}`,
+            id: targetId,
             key: '', // Left side empty key for user to define
-            label: 'New Cropped Field',
-            value: extractedCropValue || '',
+            label: 'Cropped Value',
+            value: 'Extracting...',
             confidence: 0.99,
             status: 'manual_added',
             category: 'google_lens_crop'
           };
-
           setFieldsState(prev => [...prev, newCroppedField]);
+        }
+
+        const activeTargetId = targetId;
+
+        try {
+          const extractedCropValue = await extractCroppedRegion(croppedBase64);
+          const finalVal = extractedCropValue || '';
+
+          setFieldsState(prev => prev.map(f => f.id === activeTargetId ? {
+            ...f,
+            value: finalVal,
+            status: 'edited'
+          } : f));
+
+          // TASK 3: Focus Management - shift input focus to DISCOVERED KEY input on the left
+          setTimeout(() => {
+            if (activeTargetId && keyInputRefs.current[activeTargetId]) {
+              keyInputRefs.current[activeTargetId]?.focus();
+              keyInputRefs.current[activeTargetId]?.select();
+            }
+          }, 100);
         } catch (err) {
           console.error('Cropped region extraction failed:', err);
+          setFieldsState(prev => prev.map(f => f.id === activeTargetId ? { ...f, value: '', status: 'edited' } : f));
         } finally {
           setIsCroppingVlm(false);
+          setDragRect(null);
+          setDragStart(null);
         }
       }
+    } else {
+      setDragRect(null);
+      setDragStart(null);
     }
-
-    setDragRect(null);
-    setDragStart(null);
   };
 
   // Handle Field Value Change
@@ -686,7 +718,11 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
               {/* Bounding Box Selection Drag Overlay */}
               {dragRect && (
                 <div 
-                  className="absolute border-2 border-indigo-500 bg-indigo-500/20 rounded-none pointer-events-none shadow-lg transition-all"
+                  className={`absolute rounded-none pointer-events-none shadow-lg transition-all ${
+                    isCroppingVlm
+                      ? 'border-2 border-indigo-500 border-dashed bg-indigo-500/30 animate-pulse ring-2 ring-indigo-400'
+                      : 'border-2 border-indigo-500 bg-indigo-500/20'
+                  }`}
                   style={{
                     left: `${dragRect.x}px`,
                     top: `${dragRect.y}px`,
@@ -694,8 +730,18 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
                     height: `${dragRect.height}px`
                   }}
                 >
-                  <div className="absolute -top-5 left-0 bg-indigo-600 text-white text-[9px] font-mono px-1.5 py-0.5 rounded-none font-bold uppercase tracking-wider flex items-center gap-1">
-                    <Crop className="w-2.5 h-2.5" /> Crop Region
+                  <div className="absolute -top-6 left-0 bg-indigo-600 text-white text-[9px] font-mono px-2 py-0.5 rounded-none font-bold uppercase tracking-wider flex items-center gap-1 shadow-md">
+                    {isCroppingVlm ? (
+                      <>
+                        <Loader2 className="w-3 h-3 animate-spin text-amber-300" />
+                        <span>Extracting Crop Text...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Crop className="w-3 h-3 text-indigo-200" />
+                        <span>Google Lens Crop Region</span>
+                      </>
+                    )}
                   </div>
                 </div>
               )}
@@ -780,8 +826,10 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
                         )}
                       </label>
                       <input
+                        ref={(el) => { keyInputRefs.current[field.id] = el; }}
                         type="text"
                         value={field.key}
+                        onFocus={() => setFocusedFieldId(field.id)}
                         onChange={(e) => handleFieldKeyChange(field.id, e.target.value)}
                         placeholder="NAME_KEY..."
                         className="w-full px-2.5 py-1.5 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-[11px] font-mono font-bold text-indigo-600 dark:text-indigo-400 focus:outline-hidden"
@@ -796,6 +844,7 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
                       <input
                         type="text"
                         value={field.value}
+                        onFocus={() => setFocusedFieldId(field.id)}
                         onChange={(e) => handleFieldValueChange(field.id, e.target.value)}
                         placeholder="Extracted value..."
                         className="w-full px-2.5 py-1.5 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-[11px] font-mono text-slate-800 dark:text-slate-100 focus:outline-hidden"

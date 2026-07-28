@@ -2,12 +2,7 @@
  * Types for ATM Receipt OCR Annotation Platform
  */
 
-export type ReceiptType = 
-  | 'ATM Cash Withdrawal'
-  | 'Balance Inquiry'
-  | 'Cash Deposit'
-  | 'Fund Transfer'
-  | 'Cassette Audit & Cleared';
+export type ReceiptType = string;
 
 export type ReviewStatus = 'pending_ocr' | 'needs_review' | 'approved' | 'rejected';
 

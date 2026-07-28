@@ -141,18 +141,27 @@ export const UploadView: React.FC<UploadViewProps> = ({
           </p>
         </div>
 
-        {/* Receipt Type Selector */}
+        {/* Document Category Selector */}
         <div className="flex items-center gap-2">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Document Category:</span>
-          <select
+          <input
+            type="text"
+            list="upload-document-categories"
             value={selectedType}
-            onChange={(e) => setSelectedType(e.target.value as ReceiptType)}
-            className="text-xs font-bold px-3 py-1.5 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:outline-hidden"
-          >
-            {receiptTypes.map((t) => (
-              <option key={t} value={t}>{t}</option>
-            ))}
-          </select>
+            onChange={(e) => setSelectedType(e.target.value)}
+            placeholder="Select or type custom..."
+            className="text-xs font-bold px-3 py-1.5 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:outline-hidden min-w-[200px]"
+          />
+          <datalist id="upload-document-categories">
+            <option value="ATM Cash Withdrawal" />
+            <option value="KTP (Indonesian ID)" />
+            <option value="Invoice" />
+            <option value="Tax Document (NPWP)" />
+            <option value="General Receipt" />
+            <option value="Passport" />
+            <option value="Driver License" />
+            <option value="Bank Statement" />
+          </datalist>
         </div>
       </div>
 

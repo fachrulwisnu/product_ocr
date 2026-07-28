@@ -59,18 +59,27 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
           </div>
 
           <div>
-            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Receipt Type Category</label>
-            <select
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">
+              Document Category (Select or Type Custom)
+            </label>
+            <input
+              type="text"
+              list="document-categories-list"
               value={receiptType}
-              onChange={(e) => setReceiptType(e.target.value as ReceiptType)}
+              onChange={(e) => setReceiptType(e.target.value)}
+              placeholder="e.g. KTP (Indonesian ID), Invoice, Passport..."
               className="w-full p-2.5 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-semibold focus:outline-hidden"
-            >
-              <option value="ATM Cash Withdrawal">ATM Cash Withdrawal</option>
-              <option value="Balance Inquiry">Balance Inquiry</option>
-              <option value="Cash Deposit">Cash Deposit</option>
-              <option value="Fund Transfer">Fund Transfer</option>
-              <option value="Cassette Audit & Cleared">Cassette Audit & Cleared</option>
-            </select>
+            />
+            <datalist id="document-categories-list">
+              <option value="ATM Cash Withdrawal" />
+              <option value="KTP (Indonesian ID)" />
+              <option value="Invoice" />
+              <option value="Tax Document (NPWP)" />
+              <option value="General Receipt" />
+              <option value="Passport" />
+              <option value="Driver License" />
+              <option value="Bank Statement" />
+            </datalist>
           </div>
 
           <div>

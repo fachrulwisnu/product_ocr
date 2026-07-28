@@ -171,17 +171,19 @@ app.post('/api/upload', async (req, res) => {
     // Default image if missing or custom upload
     const imageContent = imageData || generateReceiptSVG('FIRST NATIONAL BANK', receiptType || 'CASH WITHDRAWAL', 'ATM-9102-LA', '$100.00', '$2,150.00', '5', '0');
 
-    console.log(`[API /api/upload] Invoking NVIDIA Nemotron VLM for ${fileName || 'ATM_Receipt.png'}...`);
+    const docCategory = receiptType || proj.receiptType || 'ATM Cash Withdrawal';
+
+    console.log(`[API /api/upload] Invoking NVIDIA Nemotron VLM for ${fileName || 'Document.png'} (${docCategory})...`);
     
-    // Call NVIDIA Nemotron VLM for direct key-value reasoning
-    const vlmResponse = await invokeNvidiaVlm(imageContent);
+    // Call NVIDIA Nemotron VLM for direct key-value reasoning with dynamic document category
+    const vlmResponse = await invokeNvidiaVlm(imageContent, docCategory);
     const fields = convertVlmJsonToFields(vlmResponse.extractedJson);
 
     const newImg: ReceiptImage = {
       id: randomUUID(),
       projectId,
-      fileName: fileName || `ATM_Receipt_${Date.now()}.png`,
-      receiptType: receiptType || proj.receiptType || 'ATM Cash Withdrawal',
+      fileName: fileName || `Document_${Date.now()}.png`,
+      receiptType: docCategory,
       fileUrl: imageContent,
       uploadDate: new Date().toISOString(),
       status: 'needs_review',
@@ -215,13 +217,13 @@ app.post('/api/upload', async (req, res) => {
 // 5b. Direct VLM Completion Route
 app.post('/api/vlm', async (req, res) => {
   try {
-    const { image } = req.body;
+    const { image, documentType } = req.body;
     if (!image) {
       return res.status(400).json({ success: false, message: 'image base64 or data URI is required' });
     }
 
-    console.log('[API /api/vlm] Executing NVIDIA Nemotron 30B VLM completion...');
-    const result = await invokeNvidiaVlm(image);
+    console.log(`[API /api/vlm] Executing NVIDIA Nemotron 30B VLM completion for ${documentType || 'General Document'}...`);
+    const result = await invokeNvidiaVlm(image, documentType || 'ATM Cash Withdrawal');
     res.json(result);
   } catch (err: any) {
     console.error('Error in /api/vlm:', err);
