@@ -5,7 +5,7 @@
 
 export interface BankTemplateSchema {
   bankName: string;
-  bankCode: 'MNC' | 'PERMATA' | 'OCBC' | 'BRI' | 'SMBC';
+  bankCode: 'MNC' | 'PERMATA' | 'OCBC' | 'BRI' | 'SMBC' | 'BCA';
   description: string;
   schemaExample: Record<string, any>;
 }
@@ -52,6 +52,21 @@ export const GOLDEN_BANK_TEMPLATES: Record<string, BankTemplateSchema> = {
       "TYPE_2": { "CASSETTE": 2000, "REJECTED": 0, "REMAINING": 1500, "DISPENSED": 500, "TOTAL": 2000 },
       "TYPE_3": { "CASSETTE": 2000, "REJECTED": 0, "REMAINING": 2000, "DISPENSED": 0, "TOTAL": 2000 },
       "TYPE_4": { "CASSETTE": 2000, "REJECTED": 0, "REMAINING": 2000, "DISPENSED": 0, "TOTAL": 2000 }
+    }
+  },
+  BCA: {
+    bankName: "Bank Central Asia (BCA)",
+    bankCode: "BCA",
+    description: "Cassette Audit & Replenishment Matrix (TYPE 1-4)",
+    schemaExample: {
+      "TERMINAL_ID": "BCA-ATM-8812",
+      "TRANSACTION_DATE": "2026-07-28 14:00",
+      "TYPE_1": { "CASSETTE": 2000, "REJECTED": 0, "REMAINING": 1800, "DISPENSED": 200, "TOTAL": 2000 },
+      "TYPE_2": { "CASSETTE": 2000, "REJECTED": 1, "REMAINING": 1900, "DISPENSED": 99, "TOTAL": 2000 },
+      "TYPE_3": { "CASSETTE": 2000, "REJECTED": 0, "REMAINING": 2000, "DISPENSED": 0, "TOTAL": 2000 },
+      "TYPE_4": { "CASSETTE": 2000, "REJECTED": 0, "REMAINING": 2000, "DISPENSED": 0, "TOTAL": 2000 },
+      "TOTAL_DISPENSED": 299,
+      "TOTAL_REMAINING": 7700
     }
   },
   BRI: {

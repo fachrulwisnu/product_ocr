@@ -30,19 +30,16 @@ export const UploadView: React.FC<UploadViewProps> = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [selectedType, setSelectedType] = useState<ReceiptType>('ATM Cash Withdrawal');
+  const [selectedType, setSelectedType] = useState<string>('');
   const [selectedModel, setSelectedModel] = useState<string>('meta/llama-3.2-90b-vision-instruct');
-
-  const receiptTypes: ReceiptType[] = [
-    'ATM Cash Withdrawal',
-    'Balance Inquiry',
-    'Cash Deposit',
-    'Fund Transfer',
-    'Cassette Audit & Cleared'
-  ];
 
   const handleFileUpload = async (files: FileList | null) => {
     if (!files || files.length === 0 || !activeProject) return;
+
+    if (!selectedType) {
+      setErrorMessage('Please select a Document Category before uploading.');
+      return;
+    }
 
     setIsProcessing(true);
     setErrorMessage(null);
@@ -95,8 +92,13 @@ export const UploadView: React.FC<UploadViewProps> = ({
   const handleSimulatePresetSample = async (presetType: ReceiptType, atmId: string, amount: string, balance: string) => {
     if (!activeProject) return;
 
+    const actualCategory = selectedType || presetType;
+    if (!selectedType) {
+      setSelectedType(presetType);
+    }
+
     setIsProcessing(true);
-    setStatusMessage(`Running NVIDIA VLM (${selectedModel.includes('llama') ? 'Llama 3.2 90B' : 'Nemotron 3'}) for ${presetType}...`);
+    setStatusMessage(`Running NVIDIA VLM (${selectedModel.includes('llama') ? 'Llama 3.2 90B' : 'Nemotron 3'}) for ${actualCategory}...`);
 
     const imageData = generateReceiptSVG(
       'FIRST NATIONAL BANK',
@@ -115,7 +117,7 @@ export const UploadView: React.FC<UploadViewProps> = ({
         body: JSON.stringify({
           projectId: activeProject.id,
           fileName: `Preset_${presetType.replace(/\s+/g, '_')}_${Date.now().toString().slice(-4)}.png`,
-          receiptType: presetType,
+          receiptType: actualCategory,
           imageData,
           modelId: selectedModel
         })
@@ -170,41 +172,51 @@ export const UploadView: React.FC<UploadViewProps> = ({
         <div className="flex flex-col gap-1.5">
           <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
             <FileText className="w-3.5 h-3.5 text-indigo-500" />
-            <span>Document Category</span>
+            <span>Document Category (Mandatory)</span>
           </label>
-          <input
-            type="text"
-            list="upload-document-categories"
+          <select
             value={selectedType}
-            onChange={(e) => setSelectedType(e.target.value)}
-            placeholder="Select or type custom..."
-            className="text-xs font-bold px-3 py-2 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-          />
-          <datalist id="upload-document-categories">
-            <option value="ATM Cash Withdrawal" />
-            <option value="KTP (Indonesian ID)" />
-            <option value="Invoice" />
-            <option value="Tax Document (NPWP)" />
-            <option value="General Receipt" />
-            <option value="Passport" />
-            <option value="Driver License" />
-            <option value="Bank Statement" />
-            <option value="Cassette Audit & Cleared" />
-          </datalist>
+            onChange={(e) => {
+              setSelectedType(e.target.value);
+              setErrorMessage(null);
+            }}
+            className={`text-xs font-bold px-3 py-2 rounded border transition-colors cursor-pointer ${
+              !selectedType 
+                ? 'border-amber-500/60 bg-amber-500/10 text-amber-600 dark:text-amber-400 focus:ring-amber-500' 
+                : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:ring-indigo-500'
+            } focus:outline-none focus:ring-1`}
+          >
+            <option value="" disabled>-- SELECT DOCUMENT CATEGORY (REQUIRED) --</option>
+            <option value="Cassette Audit - MNC">Cassette Audit - MNC</option>
+            <option value="Cassette Audit - SMBC">Cassette Audit - SMBC</option>
+            <option value="Cassette Audit - BRI">Cassette Audit - BRI</option>
+            <option value="Cassette Audit - Permata">Cassette Audit - Permata</option>
+            <option value="Cassette Audit - OCBC">Cassette Audit - OCBC</option>
+            <option value="Cassette Audit - BCA">Cassette Audit - BCA</option>
+            <option value="ATM Cash Withdrawal">ATM Cash Withdrawal</option>
+            <option value="KTP (Indonesian ID)">KTP (Indonesian ID)</option>
+            <option value="Invoice">Invoice</option>
+            <option value="Tax Document (NPWP)">Tax Document (NPWP)</option>
+            <option value="Passport">Passport</option>
+            <option value="Bank Statement">Bank Statement</option>
+          </select>
         </div>
       </div>
 
       {/* Main Drag & Drop Zone */}
       <div
-        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+        onDragOver={(e) => { e.preventDefault(); if (selectedType) setIsDragging(true); }}
         onDragLeave={() => setIsDragging(false)}
         onDrop={(e) => {
           e.preventDefault();
           setIsDragging(false);
+          if (!selectedType) return;
           handleFileUpload(e.dataTransfer.files);
         }}
         className={`relative border-2 border-dashed rounded p-10 text-center transition-all ${
-          isDragging
+          !selectedType
+            ? 'border-amber-500/40 bg-amber-500/5 opacity-70 cursor-not-allowed'
+            : isDragging
             ? 'border-indigo-500 bg-indigo-500/10'
             : isDarkMode
             ? 'border-slate-800 bg-slate-900/60 hover:border-slate-700'
@@ -216,25 +228,41 @@ export const UploadView: React.FC<UploadViewProps> = ({
           accept="image/png, image/jpeg, image/jpg, application/pdf"
           multiple
           onChange={(e) => handleFileUpload(e.target.files)}
-          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-          disabled={isProcessing}
+          className={`absolute inset-0 w-full h-full opacity-0 z-10 ${
+            !selectedType || isProcessing ? 'cursor-not-allowed pointer-events-none' : 'cursor-pointer'
+          }`}
+          disabled={!selectedType || isProcessing}
         />
 
         <div className="space-y-4 max-w-md mx-auto pointer-events-none">
-          <div className="w-16 h-16 rounded bg-indigo-500/10 border border-indigo-500/20 text-indigo-500 mx-auto flex items-center justify-center">
+          <div className={`w-16 h-16 rounded border mx-auto flex items-center justify-center transition-colors ${
+            !selectedType
+              ? 'bg-amber-500/10 border-amber-500/20 text-amber-500'
+              : 'bg-indigo-500/10 border-indigo-500/20 text-indigo-500'
+          }`}>
             {isProcessing ? (
               <Loader2 className="w-8 h-8 animate-spin" />
+            ) : !selectedType ? (
+              <AlertCircle className="w-8 h-8 text-amber-500" />
             ) : (
               <Upload className="w-8 h-8" />
             )}
           </div>
 
           <div>
-            <h3 className="font-bold text-sm uppercase tracking-wide">
-              {isProcessing ? 'Processing with NVIDIA NIM OCR API...' : 'Drag & Drop ATM Receipt Images'}
+            <h3 className={`font-bold text-sm uppercase tracking-wide ${
+              !selectedType ? 'text-amber-600 dark:text-amber-400 font-extrabold' : ''
+            }`}>
+              {isProcessing 
+                ? 'Processing with NVIDIA VLM API...' 
+                : !selectedType 
+                ? '⚠️ PLEASE SELECT A DOCUMENT CATEGORY FIRST' 
+                : `Drag & Drop ${selectedType} Images`}
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              Supports PNG, JPG, JPEG, or scanned PDF documents up to 25MB
+              {!selectedType
+                ? 'Select a bank or document category above to unlock file ingestion'
+                : 'Supports PNG, JPG, JPEG, or scanned PDF documents up to 25MB'}
             </p>
           </div>
 
@@ -249,9 +277,16 @@ export const UploadView: React.FC<UploadViewProps> = ({
               {statusMessage}
             </div>
           ) : (
-            <button className="px-4 py-2 rounded text-xs font-bold uppercase tracking-wider bg-indigo-600 text-white shadow-md hover:bg-indigo-700 inline-flex items-center gap-2">
+            <button
+              disabled={!selectedType || isProcessing}
+              className={`px-4 py-2 rounded text-xs font-bold uppercase tracking-wider shadow-md inline-flex items-center gap-2 transition-all ${
+                !selectedType
+                  ? 'bg-slate-300 dark:bg-slate-800 text-slate-500 cursor-not-allowed opacity-50'
+                  : 'bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer'
+              }`}
+            >
               <FolderOpen className="w-4 h-4" />
-              Browse Local Files
+              {!selectedType ? '⚠️ Select Category First' : 'Browse Local Files'}
             </button>
           )}
         </div>
