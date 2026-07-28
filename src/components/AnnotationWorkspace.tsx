@@ -289,11 +289,18 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
     }
   };
 
-  // TASK 1 & TASK 2: VERIFY & SAVE with Explicit Try/Catch & Error Toasts
+  // TASK 1 & TASK 2: VERIFY & SAVE with Explicit Try/Catch & Error Toasts (Pessimistic UI)
   const handleApprove = async () => {
     setIsSavingSupabase(true);
     setSaveError(null);
     setSaveNotification(null);
+
+    // 1. Validate project_id and image_id before calling Supabase
+    if (!currentImage?.projectId || !currentImage?.id) {
+      setSaveError('Invalid Document: project_id or image_id is null or undefined.');
+      setIsSavingSupabase(false);
+      return;
+    }
 
     // Convert fields state to clean JSON object
     const jsonExtraction: Record<string, any> = {};
@@ -304,19 +311,20 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
     });
 
     try {
-      // 1. Call saveVerifiedExtraction which inserts to vlm_results, dynamic_labels, and few_shot_library
+      // 2. Call saveVerifiedExtraction which inserts to vlm_results, dynamic_labels, and few_shot_library
+      // Throws error if any Supabase insert fails
       await saveVerifiedExtraction(
         currentImage.projectId,
         currentImage.id,
         jsonExtraction
       );
 
-      // Toast Success ONLY fires at the end of the try block
-      setSaveNotification('Saved to Supabase & Added to Few-Shot Learning Library!');
-      setTimeout(() => setSaveNotification(null), 4000);
+      // 3. ONLY if all Supabase inserts return successfully, update document status & trigger Audit Log
+      await onSaveLabels(currentImage.id, fieldsState, 'approved');
 
-      // Update parent handler
-      onSaveLabels(currentImage.id, fieldsState, 'approved');
+      // Toast Success ONLY fires at the end of the try block
+      setSaveNotification('Successfully Saved to Supabase & Added to Few-Shot Learning Library!');
+      setTimeout(() => setSaveNotification(null), 4000);
 
       // Move to next image if available
       const nextIdx = images.findIndex(i => i.id === currentImage.id) + 1;
@@ -325,7 +333,7 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
       }
     } catch (err: any) {
       console.error('Verification & Save Error:', err);
-      // Catch block MUST trigger error message
+      // Catch block MUST trigger error message and keep status unchanged
       setSaveError(err?.message || 'Failed to persist to Supabase database.');
     } finally {
       setIsSavingSupabase(false);

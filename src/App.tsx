@@ -111,14 +111,18 @@ export default function App() {
         body: JSON.stringify({ fields, status, reviewedBy: 'Senior AI Annotator' })
       });
 
-      if (res.ok) {
-        const updatedImg = await res.json();
-        setImages(prev => prev.map(i => i.id === imageId ? updatedImg : i));
-        setSelectedImage(updatedImg);
-        fetchData();
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ error: 'Failed to update image status on server' }));
+        throw new Error(errorData.error || 'Failed to update image status on server');
       }
+
+      const updatedImg = await res.json();
+      setImages(prev => prev.map(i => i.id === imageId ? updatedImg : i));
+      setSelectedImage(updatedImg);
+      fetchData();
     } catch (err) {
       console.error('Error saving labels:', err);
+      throw err;
     }
   };
 
