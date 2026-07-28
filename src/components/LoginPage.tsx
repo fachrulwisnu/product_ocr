@@ -44,7 +44,7 @@ export const LoginPage: React.FC = () => {
           </div>
           <div>
             <h1 className="text-xl font-black uppercase tracking-wider text-white">Enterprise ATM Document AI</h1>
-            <p className="text-xs text-slate-400 font-mono">Phase 1 Infrastructure & Supabase Auth</p>
+            <p className="text-xs text-slate-400 font-mono">Phase 5 Hybrid Reasoning & Annotation Engine</p>
           </div>
         </div>
 
@@ -121,11 +121,11 @@ export const LoginPage: React.FC = () => {
         <div className="mt-6 p-3 rounded bg-slate-950/60 border border-slate-800 text-[11px] text-slate-400 space-y-1 font-mono">
           <div className="flex items-center gap-1.5 text-slate-300 font-bold">
             <Server className="w-3.5 h-3.5 text-indigo-400" />
-            <span>Phase 1 Backend Status:</span>
+            <span>Phase 5 Enterprise Platform Status:</span>
           </div>
-          <p>• Multi-tenant Organizations & Supabase RLS Disabled</p>
-          <p>• projects_ocr & api_keys SQL Tables Initialized</p>
-          <p>• Express Rate Limiter & Helmet Standardized</p>
+          <p>• Multi-Tenant Projects & Supabase Auth</p>
+          <p>• Hybrid OCR & Ultra Reasoning LLM Engines Active</p>
+          <p>• Annotation Studio & HITL Verification Table</p>
         </div>
       </div>
     </div>

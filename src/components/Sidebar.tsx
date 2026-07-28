@@ -63,7 +63,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
           <div>
             <h2 className="font-extrabold text-xs tracking-wider uppercase text-white">Document AI</h2>
-            <p className="text-[10px] text-slate-400 font-mono">Phase 1 Infrastructure</p>
+            <p className="text-[10px] text-slate-400 font-mono">Phase 5 Enterprise Platform</p>
           </div>
         </div>
 

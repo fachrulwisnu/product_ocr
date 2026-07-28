@@ -63,7 +63,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               Welcome back, <span className="text-emerald-400 font-mono">{user?.email || 'operator@atm-ai.internal'}</span>
             </h2>
             <p className="text-xs text-slate-400">
-              Supabase Auth Session Active • Phase 1 Core Infrastructure & Multi-Tenant SQL Schema
+              Supabase Auth Session Active • Phase 5 Enterprise Hybrid AI & Annotation Studio
             </p>
           </div>
         </div>
