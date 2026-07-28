@@ -56,7 +56,7 @@ export const UploadView: React.FC<UploadViewProps> = ({
         });
 
         // Compress image to max 1024px JPEG at 0.8 quality
-        setStatusMessage(`Compressing & Sending ${file.name} to ${selectedModel.includes('llama') ? 'Llama 3.2 90B' : 'Nemotron 3'}...`);
+        setStatusMessage(`Compressing & Sending ${file.name} to ${selectedModel.includes('ocr') ? 'Nemotron OCR v2' : selectedModel.includes('llama') ? 'Llama 3.2 90B' : 'Nemotron 3'}...`);
         const compressedImageData = await compressImageForVlm(rawBase64, 1024, 0.8);
 
         const response = await fetch('/api/upload', {
@@ -98,7 +98,7 @@ export const UploadView: React.FC<UploadViewProps> = ({
     }
 
     setIsProcessing(true);
-    setStatusMessage(`Running NVIDIA VLM (${selectedModel.includes('llama') ? 'Llama 3.2 90B' : 'Nemotron 3'}) for ${actualCategory}...`);
+    setStatusMessage(`Running NVIDIA VLM (${selectedModel.includes('ocr') ? 'Nemotron OCR v2' : selectedModel.includes('llama') ? 'Llama 3.2 90B' : 'Nemotron 3'}) for ${actualCategory}...`);
 
     const imageData = generateReceiptSVG(
       'FIRST NATIONAL BANK',
@@ -162,6 +162,9 @@ export const UploadView: React.FC<UploadViewProps> = ({
           >
             <option value="meta/llama-3.2-90b-vision-instruct">
               Llama 3.2 90B Vision - High Accuracy
+            </option>
+            <option value="nvidia/nemotron-ocr-v2">
+              Nemotron OCR v2 - Specialized Vision
             </option>
             <option value="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning">
               Nemotron 3 Omni - Fast Reasoning

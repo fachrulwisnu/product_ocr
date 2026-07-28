@@ -10,41 +10,85 @@ import { getGoldenTemplatesPrompt } from './goldenTemplates';
 // Hardcoded NVIDIA API Key as requested by project specifications
 export const HARDCODED_NVIDIA_API_KEY = "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";
 
-export async function extractFullReceipt(
+export async function extractReceiptData(
   base64Image: string, 
-  fewShotExamples: Record<string, any>[] = [],
   documentType: string = "ATM Cash Withdrawal",
-  modelId: string = "meta/llama-3.2-90b-vision-instruct"
+  modelId: string = "meta/llama-3.2-90b-vision-instruct",
+  fewShotExamples: Record<string, any>[] = []
 ): Promise<Record<string, any>> {
-  const invokeUrl = "https://integrate.api.nvidia.com/v1/chat/completions";
-  const stream = false;
+  // Sanitize base64 string
+  const base64DataOnly = base64Image.includes('base64,') ? base64Image.split('base64,')[1] : base64Image;
+  const fullDataUrl = `data:image/jpeg;base64,${base64DataOnly}`;
 
-  // HARDCODED HEADER AS REQUESTED
-  const headers = {
-    "Authorization": "Bearer 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",
-    "Accept": "application/json",
-    "Content-Type": "application/json"
-  };
+  // ---------------------------------------------------------
+  // ROUTE A: NEMOTRON OCR V2 (COMPUTER VISION API)
+  // ---------------------------------------------------------
+  if (modelId === 'nvidia/nemotron-ocr-v2') {
+    const invokeUrl = "https://ai.api.nvidia.com/v1/cv/nvidia/nemotron-ocr-v2";
+    const headers = {
+      "Authorization": "Bearer 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",
+      "Accept": "application/json",
+      "Content-Type": "application/json"
+    };
 
-  // Ensure image is proper base64 data URI
-  let formattedImageUrl = base64Image;
-  if (!base64Image.startsWith('data:')) {
-    formattedImageUrl = `data:image/png;base64,${base64Image}`;
-  }
-
-  // Detect bank code from documentType if present
-  let matchedBankCode: string | undefined = undefined;
-  const docTypeUpper = (documentType || "").toUpperCase();
-  for (const code of ['MNC', 'PERMATA', 'OCBC', 'BRI', 'SMBC']) {
-    if (docTypeUpper.includes(code)) {
-      matchedBankCode = code;
-      break;
+    if (base64DataOnly.length > 180000) {
+      console.warn("Base64 string exceeds 180k characters. Consider compressing the image in the frontend.");
     }
-  }
 
-  const goldenTemplatesPrompt = getGoldenTemplatesPrompt(matchedBankCode);
+    const payload = {
+      input: [
+        {
+          type: "image_url",
+          url: fullDataUrl
+        }
+      ]
+    };
 
-  const systemPrompt = `You are an expert OCR Data Engineer parsing Indonesian Cassette Audit receipts and documents.
+    try {
+      const response = await axios.post(invokeUrl, payload, { headers, timeout: 90000 });
+      const resData = response.data;
+      if (typeof resData === 'string') {
+        return parseContentToJson(resData);
+      } else if (resData && typeof resData === 'object') {
+        if (resData.choices?.[0]?.message?.content) {
+          return parseContentToJson(resData.choices[0].message.content);
+        }
+        if (typeof resData.text === 'string') {
+          return parseContentToJson(resData.text);
+        }
+        return resData;
+      }
+      return resData;
+    } catch (error) {
+      console.error("Nemotron OCR v2 Error:", error);
+      throw error;
+    }
+  } 
+
+  // ---------------------------------------------------------
+  // ROUTE B: LLAMA 3.2 & NEMOTRON OMNI (CHAT COMPLETIONS API)
+  // ---------------------------------------------------------
+  else {
+    const invokeUrl = "https://integrate.api.nvidia.com/v1/chat/completions";
+    const headers = {
+      "Authorization": "Bearer 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",
+      "Accept": "application/json",
+      "Content-Type": "application/json"
+    };
+
+    // Detect bank code from documentType if present
+    let matchedBankCode: string | undefined = undefined;
+    const docTypeUpper = (documentType || "").toUpperCase();
+    for (const code of ['MNC', 'PERMATA', 'OCBC', 'BRI', 'SMBC', 'BCA']) {
+      if (docTypeUpper.includes(code)) {
+        matchedBankCode = code;
+        break;
+      }
+    }
+
+    const goldenTemplatesPrompt = getGoldenTemplatesPrompt(matchedBankCode);
+
+    const systemPrompt = `You are an expert OCR Data Engineer parsing Indonesian Cassette Audit receipts and documents.
 Your primary directive is to map the unstructured text into the exact nested JSON schema provided in the Golden Templates below.
 If the receipt is heavily folded or faded, use the Golden Template to infer the missing structural keys (e.g., if 'REMAINING' is unreadable but the number aligns with the 3rd row of TYPE_1, map it to TYPE_1.REMAINING).
 
@@ -67,80 +111,86 @@ Return strictly in this JSON format:
   }
 }`;
 
-  const fewShotContext = (fewShotExamples && fewShotExamples.length > 0)
-    ? `\n\nHere are historical verified examples of similar receipts to guide your formatting (Instant Learning):\n${JSON.stringify(fewShotExamples.slice(0, 5), null, 2)}`
-    : "";
+    const fewShotContext = (fewShotExamples && fewShotExamples.length > 0)
+      ? `\n\nHere are historical verified examples of similar receipts to guide your formatting (Instant Learning):\n${JSON.stringify(fewShotExamples.slice(0, 5), null, 2)}`
+      : "";
 
-  const finalPromptText = `${systemPrompt}\n\n${fewShotContext}`;
+    const finalPromptText = `${systemPrompt}\n\n${fewShotContext}`;
 
-  const chosenModel = modelId || "meta/llama-3.2-90b-vision-instruct";
+    const chosenModel = modelId || "meta/llama-3.2-90b-vision-instruct";
 
-  const messages = [
-    {
-      "role": "user",
-      "content": [
-        {
-          "type": "text",
-          "text": finalPromptText
-        },
-        {
-          "type": "image_url",
-          "image_url": {
-            "url": formattedImageUrl
+    const messages = [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": finalPromptText
+          },
+          {
+            "type": "image_url",
+            "image_url": {
+              "url": fullDataUrl
+            }
           }
-        }
-      ]
+        ]
+      }
+    ];
+
+    // Dynamically build payload based on the selected model
+    let payload: any = {
+      model: chosenModel,
+      messages: messages,
+      stream: false,
+    };
+
+    if (chosenModel === 'meta/llama-3.2-90b-vision-instruct') {
+      payload = {
+        ...payload,
+        frequency_penalty: 0,
+        max_tokens: 4096,
+        presence_penalty: 0,
+        temperature: 0.1,
+        top_p: 1
+      };
+    } else if (chosenModel === 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning') {
+      payload = {
+        ...payload,
+        max_tokens: 65536,
+        reasoning_budget: 16384,
+        temperature: 0.6,
+        top_p: 0.95
+      };
+    } else {
+      payload = {
+        ...payload,
+        max_tokens: 4096,
+        temperature: 0.7
+      };
     }
-  ];
 
-  // Dynamically build payload based on the selected model
-  let payload: any = {
-    model: chosenModel,
-    messages: messages,
-    stream: stream,
-  };
-
-  if (chosenModel === 'meta/llama-3.2-90b-vision-instruct') {
-    payload = {
-      ...payload,
-      frequency_penalty: 0,
-      max_tokens: 4096, // Increased from 512 to ensure large JSON responses fit
-      presence_penalty: 0,
-      temperature: 1,
-      top_p: 1
-    };
-  } else if (chosenModel === 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning') {
-    payload = {
-      ...payload,
-      max_tokens: 65536,
-      reasoning_budget: 16384,
-      temperature: 0.6,
-      top_p: 0.95
-    };
-  } else {
-    payload = {
-      ...payload,
-      max_tokens: 4096,
-      temperature: 0.7
-    };
-  }
-
-  try {
-    const response = await axios.post(invokeUrl, payload, {
-      headers: headers,
-      timeout: 90000 // FIX: Increased to 90 seconds
-    });
-    
-    const extractedContent = response.data?.choices?.[0]?.message?.content || "";
-    let cleaned = extractedContent.trim();
-    if (cleaned.startsWith('```')) {
-      cleaned = cleaned.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+    try {
+      const response = await axios.post(invokeUrl, payload, {
+        headers: headers,
+        timeout: 90000
+      });
+      
+      const extractedContent = response.data?.choices?.[0]?.message?.content || "";
+      return parseContentToJson(extractedContent);
+    } catch (error) {
+      console.error("Chat Completions API Error:", error);
+      throw error;
     }
-    return JSON.parse(cleaned);
-  } catch (error) {
-    console.error("VLM Extraction Error:", error);
-    throw error;
   }
+}
+
+export async function extractFullReceipt(
+  base64Image: string, 
+  fewShotExamples: Record<string, any>[] = [],
+  documentType: string = "ATM Cash Withdrawal",
+  modelId: string = "meta/llama-3.2-90b-vision-instruct"
+): Promise<Record<string, any>> {
+  return extractReceiptData(base64Image, documentType, modelId, fewShotExamples);
 }
 
 /**
@@ -197,15 +247,6 @@ export async function extractCroppedRegion(croppedBase64: string): Promise<strin
     console.error("VLM Cropped Region Extraction Error:", error);
     return "";
   }
-}
-
-export async function extractReceiptData(
-  base64Image: string, 
-  documentType: string = "ATM Cash Withdrawal",
-  modelId: string = "meta/llama-3.2-90b-vision-instruct",
-  fewShotExamples: Record<string, any>[] = []
-): Promise<Record<string, any>> {
-  return extractFullReceipt(base64Image, fewShotExamples, documentType, modelId);
 }
 
 export interface VlmExtractionResponse {
