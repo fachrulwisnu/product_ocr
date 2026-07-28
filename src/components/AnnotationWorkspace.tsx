@@ -16,9 +16,12 @@ import {
   Crop,
   Loader2,
   AlertCircle,
-  BrainCircuit
+  BrainCircuit,
+  Eye,
+  EyeOff,
+  FileText
 } from 'lucide-react';
-import { extractCroppedRegion, extractFullReceipt, convertVlmJsonToFields } from '../lib/nvidiaVlm';
+import { extractCroppedRegion, extractFullReceipt, convertVlmJsonToFields, invokeNvidiaVlm } from '../lib/nvidiaVlm';
 import { saveVerifiedExtraction, fetchFewShotExamples } from '../lib/supabaseClient';
 
 interface AnnotationWorkspaceProps {
@@ -78,6 +81,7 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
 
   // Dual-Engine Client-Side Visual Bounding Boxes (Tesseract.js)
   const [visualBoxes, setVisualBoxes] = useState<VisualBBox[]>([]);
+  const [showBoundingBoxes, setShowBoundingBoxes] = useState<boolean>(true);
   const [isOcrRunning, setIsOcrRunning] = useState(false);
   const [imageNaturalWidth, setImageNaturalWidth] = useState<number>(600);
   const [imageNaturalHeight, setImageNaturalHeight] = useState<number>(880);
@@ -408,13 +412,16 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
     setFieldsState(prev => prev.filter(f => f.id !== fieldId));
   };
 
-  // Re-run VLM with Few-Shot Prompt Injection
+  // Re-run VLM with Few-Shot Prompt Injection & Auto Category Classification
   const handleReExtractWithFewShot = async () => {
     if (!currentImage.fileUrl) return;
     setIsReExtractingVlm(true);
     try {
-      const extractedJson = await extractFullReceipt(currentImage.fileUrl, fewShotExamples);
-      const newFields = convertVlmJsonToFields(extractedJson);
+      const vlmRes = await invokeNvidiaVlm(currentImage.fileUrl, currentImage.receiptType);
+      if (vlmRes.documentCategory && currentImage) {
+        currentImage.receiptType = vlmRes.documentCategory;
+      }
+      const newFields = convertVlmJsonToFields(vlmRes.extractedJson);
       if (newFields.length > 0) {
         setFieldsState(newFields);
       }
@@ -515,6 +522,29 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
             {currentImage.status}
           </span>
 
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-indigo-500/20 bg-indigo-500/10 text-indigo-400 font-mono text-[10px] font-bold">
+            <FileText className="w-3 h-3 text-indigo-400" />
+            <span>Category:</span>
+            <input
+              type="text"
+              list="doc-cat-workspace-list"
+              value={currentImage.receiptType || 'KTP (Indonesian ID)'}
+              onChange={(e) => {
+                currentImage.receiptType = e.target.value;
+                setFieldsState([...fieldsState]);
+              }}
+              className="bg-transparent border-b border-indigo-500/40 font-bold focus:outline-none focus:border-indigo-400 px-1 text-indigo-300 dark:text-indigo-300 min-w-[130px]"
+            />
+            <datalist id="doc-cat-workspace-list">
+              <option value="KTP (Indonesian ID)" />
+              <option value="ATM Receipt" />
+              <option value="Invoice" />
+              <option value="Tax Document (NPWP)" />
+              <option value="Passport" />
+              <option value="Driver License" />
+            </datalist>
+          </div>
+
           {fewShotExamples.length > 0 && (
             <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center gap-1">
               <BrainCircuit className="w-3 h-3 text-indigo-400" /> Few-Shot Active ({fewShotExamples.length} samples)
@@ -614,6 +644,19 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
               >
                 <RotateCw className="w-4 h-4" />
               </button>
+
+              <button
+                onClick={() => setShowBoundingBoxes(prev => !prev)}
+                title={showBoundingBoxes ? "Hide Bounding Boxes" : "Show Bounding Boxes"}
+                className={`px-2 py-1.5 rounded cursor-pointer transition-colors flex items-center gap-1.5 font-mono text-[11px] font-bold ${
+                  showBoundingBoxes 
+                    ? 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30 hover:bg-indigo-500/25' 
+                    : 'bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-300 dark:border-slate-700 hover:bg-slate-300 dark:hover:bg-slate-700'
+                }`}
+              >
+                {showBoundingBoxes ? <Eye className="w-3.5 h-3.5 text-indigo-500" /> : <EyeOff className="w-3.5 h-3.5 text-slate-400" />}
+                <span>{showBoundingBoxes ? "Boxes On" : "Boxes Off"}</span>
+              </button>
             </div>
 
             <div className="flex items-center gap-2">
@@ -659,7 +702,7 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
               />
 
               {/* Client-Side Visual Bounding Boxes (Tesseract.js & VLM Field Matches) */}
-              {imageNaturalWidth > 0 && imageNaturalHeight > 0 && matchedBoxes.map((box) => {
+              {showBoundingBoxes && imageNaturalWidth > 0 && imageNaturalHeight > 0 && matchedBoxes.map((box) => {
                 const leftPct = (box.x0 / imageNaturalWidth) * 100;
                 const topPct = (box.y0 / imageNaturalHeight) * 100;
                 const widthPct = Math.max(0.5, ((box.x1 - box.x0) / imageNaturalWidth) * 100);

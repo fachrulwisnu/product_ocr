@@ -31,7 +31,17 @@ export async function extractFullReceipt(
   }
 
   const docCategory = documentType || "Document";
-  let promptText = `Extract all relevant details from this ${docCategory} into a clean JSON object. Dynamically name the keys based on the context of a ${docCategory}. Return ONLY the raw JSON object, without any markdown formatting, backticks, or conversational text.`;
+  let promptText = `Analyze the uploaded image and extract all key-value details. 
+Identify the type of document and include it in the JSON output under the key "document_category". 
+Possible categories are: "KTP (Indonesian ID)", "ATM Receipt", "Invoice", "Tax Document (NPWP)", "Passport", or "Unknown".
+
+Return strictly in this JSON format:
+{
+  "document_category": "KTP (Indonesian ID)",
+  "extracted_data": {
+     // ... extracted key-values here
+  }
+}`;
 
   if (fewShotExamples && fewShotExamples.length > 0) {
     promptText += "\n\nHere are verified examples of expected key-value extraction structure for this project format:\n";
@@ -147,6 +157,7 @@ export async function extractReceiptData(
 export interface VlmExtractionResponse {
   rawText: string;
   extractedJson: Record<string, any>;
+  documentCategory: string;
   processingTimeMs: number;
   provider: string;
 }
@@ -160,10 +171,38 @@ export async function invokeNvidiaVlm(
 ): Promise<VlmExtractionResponse> {
   const startTime = Date.now();
   try {
-    const extractedJson = await extractReceiptData(imageDataUri, documentType);
+    const rawRes = await extractReceiptData(imageDataUri, documentType);
+
+    let documentCategory: string = rawRes.document_category || "";
+    let extractedJson: Record<string, any> = (rawRes.extracted_data && typeof rawRes.extracted_data === 'object')
+      ? rawRes.extracted_data
+      : rawRes;
+
+    // Clean out document_category if present in extractedJson
+    if (extractedJson.document_category) {
+      delete extractedJson.document_category;
+    }
+
+    // Fast keyword classification fallback if missing or Unknown
+    if (!documentCategory || documentCategory === "Unknown") {
+      const fullTextStr = JSON.stringify(rawRes).toLowerCase();
+      if (fullTextStr.includes('nik') || fullTextStr.includes('provinsi') || fullTextStr.includes('agama') || fullTextStr.includes('ktp') || fullTextStr.includes('kewarganegaraan')) {
+        documentCategory = "KTP (Indonesian ID)";
+      } else if (fullTextStr.includes('atm') || fullTextStr.includes('tarik') || fullTextStr.includes('saldo') || fullTextStr.includes('withdrawal') || fullTextStr.includes('bank')) {
+        documentCategory = "ATM Receipt";
+      } else if (fullTextStr.includes('invoice') || fullTextStr.includes('faktur') || fullTextStr.includes('bill to') || fullTextStr.includes('subtotal')) {
+        documentCategory = "Invoice";
+      } else if (fullTextStr.includes('npwp') || fullTextStr.includes('pajak')) {
+        documentCategory = "Tax Document (NPWP)";
+      } else {
+        documentCategory = documentType || "General Document";
+      }
+    }
+
     return {
       rawText: JSON.stringify(extractedJson, null, 2),
       extractedJson,
+      documentCategory,
       processingTimeMs: Date.now() - startTime,
       provider: 'NVIDIA_NEMOTRON'
     };
@@ -233,14 +272,20 @@ export function generateFallbackVlmExtraction(): Record<string, any> {
  * Convert dynamic JSON extracted by VLM into UI ExtractedField list
  */
 export function convertVlmJsonToFields(jsonObj: Record<string, any>): any[] {
-  return Object.entries(jsonObj).map(([key, val], idx) => ({
-    id: `field-vlm-${idx}-${Date.now()}`,
-    key: key.toUpperCase().replace(/\s+/g, '_'),
-    label: key.replace(/_/g, ' '),
-    value: String(val ?? ''),
-    confidence: 0.95,
-    status: 'predicted',
-    category: 'vlm_discovered'
-  }));
+  const data = (jsonObj.extracted_data && typeof jsonObj.extracted_data === 'object')
+    ? jsonObj.extracted_data
+    : jsonObj;
+
+  return Object.entries(data)
+    .filter(([key]) => key !== 'document_category')
+    .map(([key, val], idx) => ({
+      id: `field-vlm-${idx}-${Date.now()}`,
+      key: key.toUpperCase().replace(/\s+/g, '_'),
+      label: key.replace(/_/g, ' '),
+      value: String(val ?? ''),
+      confidence: 0.95,
+      status: 'predicted',
+      category: 'vlm_discovered'
+    }));
 }
 
