@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import { invokeNvidiaVlm, convertVlmJsonToFields, HARDCODED_NVIDIA_API_KEY } from './src/lib/nvidiaVlm';
 import { predictFieldsFromOCR, runInstantLearningTraining } from './src/lib/extractionEngine';
@@ -19,24 +20,24 @@ let imagesStore: ReceiptImage[] = [...INITIAL_RECEIPT_IMAGES];
 let trainingJobsStore: TrainingJob[] = [];
 let activityLogsStore: ActivityLog[] = [
   {
-    id: 'act-1',
-    projectId: 'proj-atm-main',
+    id: randomUUID(),
+    projectId: 'a0000000-0000-4000-a000-000000000001',
     action: 'upload',
     user: 'Senior AI Engineer',
     timestamp: '2026-07-27T10:12:00Z',
     details: 'Uploaded ATM_Withdrawal_Receipt_001.png'
   },
   {
-    id: 'act-2',
-    projectId: 'proj-atm-main',
+    id: randomUUID(),
+    projectId: 'a0000000-0000-4000-a000-000000000001',
     action: 'ocr_processed',
     user: 'NVIDIA NIM OCR API',
     timestamp: '2026-07-27T10:12:05Z',
     details: 'Executed NVIDIA NIM OCR API bounding box extraction'
   },
   {
-    id: 'act-3',
-    projectId: 'proj-atm-main',
+    id: randomUUID(),
+    projectId: 'a0000000-0000-4000-a000-000000000001',
     action: 'training_completed',
     user: 'Instant Learning Engine',
     timestamp: '2026-07-27T18:30:00Z',
@@ -112,7 +113,7 @@ app.post('/api/projects', (req, res) => {
   }
 
   const newProj: Project = {
-    id: `proj-${Date.now()}`,
+    id: randomUUID(),
     name,
     description: description || 'ATM receipt extraction project powered by NVIDIA NIM OCR',
     receiptType: receiptType || 'ATM Cash Withdrawal',
@@ -177,7 +178,7 @@ app.post('/api/upload', async (req, res) => {
     const fields = convertVlmJsonToFields(vlmResponse.extractedJson);
 
     const newImg: ReceiptImage = {
-      id: `img-${Date.now()}`,
+      id: randomUUID(),
       projectId,
       fileName: fileName || `ATM_Receipt_${Date.now()}.png`,
       receiptType: receiptType || proj.receiptType || 'ATM Cash Withdrawal',

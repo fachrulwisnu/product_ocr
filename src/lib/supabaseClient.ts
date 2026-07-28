@@ -15,6 +15,23 @@ export const supabase: SupabaseClient = createClient(
   supabaseAnonKey || 'placeholder-key'
 );
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function isValidUuid(id: string): boolean {
+  return typeof id === 'string' && UUID_REGEX.test(id);
+}
+
+export function ensureValidUuid(id: string, defaultNamespace = '00000000'): string {
+  if (isValidUuid(id)) {
+    return id;
+  }
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  const hexOnly = (id || '').replace(/[^a-f0-9]/gi, '').padEnd(12, '0').slice(0, 12);
+  return `${defaultNamespace}-0000-4000-8000-${hexOnly}`;
+}
+
 export function isSupabaseConfigured(): boolean {
   return Boolean(
     supabaseUrl && 
@@ -125,11 +142,13 @@ export async function fetchFewShotExamples(projectId: string, limit = 5): Promis
   const sb = getSupabase();
   if (!sb) return [];
 
+  const targetProjectId = ensureValidUuid(projectId, 'a0000000');
+
   try {
     const { data, error } = await sb
       .from('few_shot_library')
       .select('verified_json_output')
-      .eq('project_id', projectId)
+      .eq('project_id', targetProjectId)
       .order('created_at', { ascending: false })
       .limit(limit);
 
@@ -158,6 +177,10 @@ export async function saveVerifiedExtraction(
     throw new Error(`Invalid arguments: project_id (${projectId}) and image_id (${imageId}) must not be null or undefined.`);
   }
 
+  // Ensure valid UUID format for PostgreSQL UUID foreign keys
+  const targetProjectId = ensureValidUuid(projectId, 'a0000000');
+  const targetImageId = ensureValidUuid(imageId, 'b0000000');
+
   const sb = getSupabase();
   if (!sb) {
     throw new Error("Supabase client is not initialized. Please verify VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY variables.");
@@ -167,7 +190,7 @@ export async function saveVerifiedExtraction(
   const { error: vlmError } = await sb
     .from('vlm_results')
     .insert([{
-      image_id: imageId,
+      image_id: targetImageId,
       provider: 'NVIDIA_NEMOTRON',
       extracted_json: verifiedJson,
       raw_response_text: JSON.stringify(verifiedJson)
@@ -182,7 +205,7 @@ export async function saveVerifiedExtraction(
   const keys = Object.keys(verifiedJson);
   if (keys.length > 0) {
     const labelsPayload = keys.map(key => ({
-      project_id: projectId,
+      project_id: targetProjectId,
       label_key: key,
       is_validated: true
     }));
@@ -201,7 +224,7 @@ export async function saveVerifiedExtraction(
   const { error: fewShotError } = await sb
     .from('few_shot_library')
     .insert([{
-      project_id: projectId,
+      project_id: targetProjectId,
       verified_json_output: verifiedJson
     }]);
 
@@ -227,9 +250,11 @@ export async function saveVlmExtraction(
     return null;
   }
 
+  const targetImageId = ensureValidUuid(imageId, 'b0000000');
+
   try {
     const record: SupabaseVlmResultRow = {
-      image_id: imageId,
+      image_id: targetImageId,
       provider,
       raw_response_text: rawResponseText || JSON.stringify(extractedJson),
       extracted_json: extractedJson,
@@ -258,12 +283,14 @@ export async function updateDynamicLabels(
   const sb = getSupabase();
   if (!sb) return [];
 
+  const targetProjectId = ensureValidUuid(projectId, 'a0000000');
+
   try {
     // 1. Fetch existing dynamic labels for project
     const { data: existingLabels, error: fetchErr } = await sb
       .from('dynamic_labels')
       .select('label_key')
-      .eq('project_id', projectId);
+      .eq('project_id', targetProjectId);
 
     if (fetchErr) {
       console.error('Error fetching existing dynamic_labels:', fetchErr);
@@ -280,7 +307,7 @@ export async function updateDynamicLabels(
     }
 
     const rowsToInsert: SupabaseDynamicLabelRow[] = newKeys.map(k => ({
-      project_id: projectId,
+      project_id: targetProjectId,
       label_key: k,
       is_validated: true,
       created_at: new Date().toISOString()

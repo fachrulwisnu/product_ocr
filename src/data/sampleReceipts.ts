@@ -2,7 +2,7 @@ import { Project, ReceiptImage, OCRResult, ExtractedField } from '../types';
 
 export const INITIAL_PROJECTS: Project[] = [
   {
-    id: 'proj-atm-main',
+    id: 'a0000000-0000-4000-a000-000000000001',
     name: 'ATM Receipt OCR - Diebold & NCR Fleet',
     description: 'Production model for automated ATM cash withdrawal, balance inquiry, and cassette audit receipts.',
     receiptType: 'ATM Cash Withdrawal',
@@ -14,7 +14,7 @@ export const INITIAL_PROJECTS: Project[] = [
     updatedAt: '2026-07-27T18:30:00Z'
   },
   {
-    id: 'proj-cassette-audit',
+    id: 'a0000000-0000-4000-a000-000000000002',
     name: 'Cassette Audit & Cleared Reports',
     description: 'Extraction model for ATM cassette cash balances, remaining bills, and card capture logs.',
     receiptType: 'Cassette Audit & Cleared',
@@ -89,8 +89,8 @@ export function generateReceiptSVG(
 // Generate Initial Receipt Images
 export const INITIAL_RECEIPT_IMAGES: ReceiptImage[] = [
   {
-    id: 'img-1',
-    projectId: 'proj-atm-main',
+    id: 'b0000000-0000-4000-b000-000000000001',
+    projectId: 'a0000000-0000-4000-a000-000000000001',
     fileName: 'ATM_Withdrawal_Receipt_001.png',
     receiptType: 'ATM Cash Withdrawal',
     fileUrl: generateReceiptSVG('FIRST NATIONAL BANK', 'CASH WITHDRAWAL', 'ATM-8842-NY', '$200.00', '$1,482.10', '10', '0'),
@@ -131,8 +131,8 @@ export const INITIAL_RECEIPT_IMAGES: ReceiptImage[] = [
     ]
   },
   {
-    id: 'img-2',
-    projectId: 'proj-atm-main',
+    id: 'b0000000-0000-4000-b000-000000000002',
+    projectId: 'a0000000-0000-4000-a000-000000000001',
     fileName: 'ATM_Balance_Inquiry_002.png',
     receiptType: 'Balance Inquiry',
     fileUrl: generateReceiptSVG('CHASE BANK ATM', 'BALANCE INQUIRY', 'ATM-3301-SF', '$0.00', '$4,920.50', '0', '0'),
@@ -159,8 +159,8 @@ export const INITIAL_RECEIPT_IMAGES: ReceiptImage[] = [
     ]
   },
   {
-    id: 'img-3',
-    projectId: 'proj-cassette-audit',
+    id: 'b0000000-0000-4000-b000-000000000003',
+    projectId: 'a0000000-0000-4000-a000-000000000002',
     fileName: 'Cassette_Audit_Cleared_003.png',
     receiptType: 'Cassette Audit & Cleared',
     fileUrl: generateReceiptSVG('DIEBOLD NIXDORF AUDIT', 'CASSETTE AUDIT', 'ATM-9912-CHI', '$0.00', '$0.00', '150', '210'),
