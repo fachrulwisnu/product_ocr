@@ -1,15 +1,14 @@
 /**
- * NVIDIA Nemotron VLM API Integration Module
- * Endpoint: https://integrate.api.nvidia.com/v1/chat/completions
- * Model: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning
+ * NVIDIA Nemotron VLM API Integration Module & Model Router
+ * Enterprise Routing Logic for Nemotron OCR v2, Nemotron 3 Ultra 550B, and Vision LLMs
  */
 
-import OpenAI from 'openai';
 import axios from 'axios';
+import OpenAI from 'openai';
 import { GOLDEN_TEMPLATES } from './goldenTemplates';
 import { supabase } from './supabaseClient';
 
-// Hardcoded NVIDIA API Key as requested by project specifications
+// Hardcoded NVIDIA API Key
 export const HARDCODED_NVIDIA_API_KEY = "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";
 
 // Helper function to fetch instant learning examples from Dataset Manager (Supabase)
@@ -43,7 +42,6 @@ async function getFewShotExamples(documentCategory: string): Promise<string> {
       return '';
     }
 
-    // Format historical data into a clean few-shot string block
     const examplesText = records
       .map((item: any, idx: number) => {
         const jsonContent = item.verified_json_output || item.extracted_data || item;
@@ -58,80 +56,32 @@ async function getFewShotExamples(documentCategory: string): Promise<string> {
   }
 }
 
+/**
+ * Enterprise AI Model Router for NVIDIA Models
+ */
 export async function extractReceiptData(
-  base64Image: string, 
+  base64Image: string,
   documentCategory?: string,
-  modelId: string = "nvidia/nemotron-3-ultra-550b-a55b",
+  modelId: string = 'nvidia/nemotron-ocr-v2',
   fewShotExamples: Record<string, any>[] = []
-): Promise<Record<string, any>> {
-  // Sanitize base64 string
+): Promise<any> {
+  // 1. Sanitize Base64 String
   const base64DataOnly = base64Image.includes('base64,') ? base64Image.split('base64,')[1] : base64Image;
   const fullDataUrl = `data:image/jpeg;base64,${base64DataOnly}`;
+  
+  // 2. Resolve Category & Schema
+  const resolvedCategory = !documentCategory || documentCategory === 'AUTO' || documentCategory === '' ? 'AUTO_DETECT' : documentCategory;
+  const schemaRule = GOLDEN_TEMPLATES[resolvedCategory] || 
+    "Format as JSON. First, automatically detect the document issuer or bank name. Then, extract all relevant fields, line items, totals, and metadata into a clean JSON structure.";
 
-  // Mobile App Auto-Detection Fallback
-  const resolvedCategory = !documentCategory || documentCategory === 'AUTO' || documentCategory === '' 
-    ? 'AUTO_DETECT' 
-    : documentCategory;
+  const systemPrompt = `You are an expert document and financial data extraction engine. Extract transaction details into a clean JSON object. Return ONLY raw JSON without markdown. STRICT SCHEMA RULE: ${schemaRule}`;
 
-  const instantLearningContext = await getFewShotExamples(resolvedCategory);
+  const modelIdLower = modelId.toLowerCase();
 
-  // Define dynamic schema rule with auto-detection capability
-  const activeSchemaRule = GOLDEN_TEMPLATES[resolvedCategory] || 
-    "Format as JSON. First, automatically detect the document issuer, bank name, or invoice type from the image (e.g., MNC, SMBC, BRI, Permata, OCBC, or General Invoice). Then, extract all relevant fields, line items, totals, and metadata into a clean JSON structure.";
-
-  // ---------------------------------------------------------
-  // ROUTE A: NEMOTRON 3 ULTRA 550B (REASONING MODEL FOR INVOICES / DOCUMENTS / PDF)
-  // ---------------------------------------------------------
-  if (modelId === 'nvidia/nemotron-3-ultra-550b-a55b') {
-    const client = new OpenAI({
-      apiKey: "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",
-      baseURL: "https://integrate.api.nvidia.com/v1",
-      dangerouslyAllowBrowser: true // Safe for client-side or server-side wrapper usage
-    });
-
-    let systemPrompt = `You are an expert document, invoice, and financial data extraction engine. Analyze the provided document/invoice content and extract all line items, totals, dates, and metadata into a clean JSON object. Return ONLY the raw JSON object without markdown formatting. STRICT SCHEMA RULE: ${activeSchemaRule}`;
-
-    systemPrompt = `${systemPrompt}${instantLearningContext}`;
-
-    try {
-      const completion: any = await client.chat.completions.create({
-        model: "nvidia/nemotron-3-ultra-550b-a55b",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: "Extract structured data from this document/invoice." }
-        ],
-        temperature: 1,
-        top_p: 0.95,
-        max_tokens: 16384,
-        stream: true,
-        extra_body: {
-          chat_template_kwargs: { enable_thinking: true },
-          reasoning_budget: 16384
-        }
-      } as any);
-
-      let fullContent = "";
-      for await (const chunk of completion) {
-        if (!chunk.choices) continue;
-        const content = chunk.choices[0].delta?.content;
-        if (content) {
-          fullContent += content;
-        }
-      }
-
-      // Clean and parse JSON response
-      const cleanedJson = fullContent.replace(/```json/g, '').replace(/```/g, '').trim();
-      return JSON.parse(cleanedJson);
-    } catch (error: any) {
-      console.error("Nemotron 3 Ultra Reasoning Error:", error);
-      throw error;
-    }
-  }
-
-  // ---------------------------------------------------------
-  // ROUTE B: NEMOTRON OCR V2 (HYBRID PIPELINE)
-  // ---------------------------------------------------------
-  else if (modelId === 'nvidia/nemotron-ocr-v2') {
+  // ====================================================================================
+  // ROUTE A: COMPUTER VISION ENDPOINT (NVIDIA NEMOTRON OCR v2)
+  // ====================================================================================
+  if (modelIdLower.includes('ocr') || modelIdLower.includes('nemotron-ocr-v2') || modelIdLower.includes('nemotron-nano-ocr-v2')) {
     const ocrUrl = "https://ai.api.nvidia.com/v1/cv/nvidia/nemotron-ocr-v2";
     const ocrHeaders = {
       "Authorization": "Bearer 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",
@@ -143,142 +93,82 @@ export async function extractReceiptData(
 
     try {
       const response = await axios.post(ocrUrl, payload, { headers: ocrHeaders, timeout: 90000 });
-      const rawData = response.data;
-      
-      const cleanedData: Record<string, string> = {};
-      const extractedTextLines: string[] = [];
-
-      if (rawData?.data && Array.isArray(rawData.data)) {
-        rawData.data.forEach((page: any) => {
-          if (page?.text_detections && Array.isArray(page.text_detections)) {
-            page.text_detections.forEach((detection: any, index: number) => {
-              const textValue = detection?.text_prediction?.text;
-              if (textValue) {
-                cleanedData[`LINE_${index + 1}`] = textValue.trim();
-                extractedTextLines.push(textValue.trim());
-              }
-            });
-          }
-        });
-      }
-
-      if (extractedTextLines.length > 0) {
-        const chatUrl = "https://integrate.api.nvidia.com/v1/chat/completions";
-        const chatHeaders = {
-          "Authorization": "Bearer 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",
-          "Accept": "application/json",
-          "Content-Type": "application/json"
-        };
-
-        const formattingPrompt = `You are an expert OCR data formatter. Format the following raw OCR text lines into a clean JSON object. STRICT SCHEMA RULE: ${activeSchemaRule}.${instantLearningContext} Return ONLY raw JSON without markdown formatting.`;
-
-        const formatPayload = {
-          model: "meta/llama-3.1-70b-instruct",
-          messages: [
-            { role: "system", content: formattingPrompt },
-            { role: "user", content: extractedTextLines.join('\n') }
-          ],
-          temperature: 0.1,
-          max_tokens: 2048
-        };
-
-        const formatResponse = await axios.post(chatUrl, formatPayload, { headers: chatHeaders, timeout: 30000 });
-        const structuredText = formatResponse.data.choices[0].message.content;
-        return JSON.parse(structuredText.replace(/```json/g, '').replace(/```/g, '').trim());
-      }
-
-      return cleanedData; 
-    } catch (error) {
-      console.error("Nemotron OCR v2 Hybrid Error:", error);
-      throw error;
+      return response.data; // Returns raw text_detections and bounding boxes
+    } catch (error: any) {
+      console.error("Nemotron OCR v2 Error:", error.response?.data || error.message);
+      throw new Error(`OCR Engine Error: ${error.response?.data?.detail || error.message}`);
     }
   }
 
-  // ---------------------------------------------------------
-  // ROUTE C: NEMOTRON NANO VL 8B
-  // ---------------------------------------------------------
-  else if (modelId === 'nvidia/llama-3.1-nemotron-nano-vl-8b-v1') {
-    // Validate that the base64 string is actually an image format supported by the vision model
-    if (!base64Image.startsWith('data:image/')) {
-      throw new Error("Invalid file format. The Nemotron Nano VL model requires an image file (JPEG or PNG). Please convert your PDF/document page to an image before uploading.");
-    }
-
-    const invokeUrl = "https://integrate.api.nvidia.com/v1/chat/completions";
-    const headers = {
-      "Authorization": "Bearer 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",
-      "Accept": "application/json",
-      "Content-Type": "application/json"
-    };
-
-    let systemPrompt = `You are an expert document and invoice processing engine. Extract all line items, totals, dates, and metadata into a clean JSON object. Return ONLY raw JSON without markdown formatting. STRICT SCHEMA RULE: ${activeSchemaRule}`;
-
-    systemPrompt = `${systemPrompt}${instantLearningContext}`;
-
-    const payload = {
-      model: "nvidia/llama-3.1-nemotron-nano-vl-8b-v1",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { 
-          role: "user", 
-          content: [
-            { type: "text", text: "Extract structured data from this document/invoice image." },
-            { type: "image_url", image_url: { url: fullDataUrl } }
-          ] 
-        }
-      ],
-      temperature: 1,
-      top_p: 0.01,
-      max_tokens: 1024,
-      seed: 50,
-      stream: false
-    };
+  // ====================================================================================
+  // ROUTE B: ADVANCED REASONING MODEL (NEMOTRON 3 ULTRA 550B via OPENAI SDK)
+  // ====================================================================================
+  else if (modelId === 'nvidia/nemotron-3-ultra-550b-a55b') {
+    const client = new OpenAI({
+      apiKey: "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",
+      baseURL: "https://integrate.api.nvidia.com/v1",
+      dangerouslyAllowBrowser: true 
+    });
 
     try {
-      const response = await axios.post(invokeUrl, payload, { headers, timeout: 90000 });
-      const extractedText = response.data.choices[0].message.content;
+      const completion: any = await client.chat.completions.create({
+        model: "nvidia/nemotron-3-ultra-550b-a55b",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: "Extract structured data from this document/invoice." }
+        ],
+        temperature: 1,
+        top_p: 0.95,
+        max_tokens: 16384,
+        // @ts-ignore
+        extra_body: {
+          chat_template_kwargs: { enable_thinking: true },
+          reasoning_budget: 16384
+        }
+      });
+
+      const extractedText = completion.choices[0]?.message?.content || "{}";
       return JSON.parse(extractedText.replace(/```json/g, '').replace(/```/g, '').trim());
     } catch (error: any) {
-      console.error("Nemotron Nano VL 8B Error:", error.response?.data || error.message);
+      console.error("Nemotron 3 Ultra Reasoning Error:", error);
       throw error;
     }
   }
 
-  // ---------------------------------------------------------
-  // ROUTE D: STANDARD LLAMA / OMNI MODELS (CHAT COMPLETIONS)
-  // ---------------------------------------------------------
+  // ====================================================================================
+  // ROUTE C: STANDARD VISION LLMs (LLAMA 3.2 90B VISION, NEMOTRON NANO VL, etc.)
+  // ====================================================================================
   else {
-    const invokeUrl = "https://integrate.api.nvidia.com/v1/chat/completions";
-    const headers = {
+    const chatUrl = "https://integrate.api.nvidia.com/v1/chat/completions";
+    const chatHeaders = {
       "Authorization": "Bearer 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",
       "Accept": "application/json",
       "Content-Type": "application/json"
     };
 
-    let systemPrompt = `Extract transaction details into a clean JSON object. Return ONLY raw JSON. STRICT SCHEMA RULE: ${activeSchemaRule}`;
-
-    systemPrompt = `${systemPrompt}${instantLearningContext}`;
-
-    let payload: any = {
+    const payload = {
       model: modelId,
       messages: [
-        { role: "user", content: [ { type: "text", text: systemPrompt }, { type: "image_url", image_url: { url: fullDataUrl } } ] }
+        {
+          role: "user",
+          content: [
+            { type: "text", text: systemPrompt },
+            { type: "image_url", image_url: { url: fullDataUrl } }
+          ]
+        }
       ],
-      stream: false,
+      max_tokens: 4096,
+      temperature: 0.1,
+      top_p: 1
     };
 
-    if (modelId === 'meta/llama-3.2-90b-vision-instruct') {
-      payload = { ...payload, max_tokens: 4096, temperature: 0.1, top_p: 1 };
-    } else {
-      payload = { ...payload, max_tokens: 65536, reasoning_budget: 16384, temperature: 0.6, top_p: 0.95 };
-    }
-
     try {
-      const response = await axios.post(invokeUrl, payload, { headers, timeout: 90000 });
+      const response = await axios.post(chatUrl, payload, { headers: chatHeaders, timeout: 90000 });
       const extractedText = response.data.choices[0].message.content;
       return JSON.parse(extractedText.replace(/```json/g, '').replace(/```/g, '').trim());
-    } catch (error) {
-      console.error("Chat Completions API Error:", error);
-      throw error;
+    } catch (error: any) {
+      console.error(`Chat Completions API Error (${modelId}):`, error.response?.data || error.message);
+      throw new Error(`Vision LLM Error: ${error.response?.data?.detail || error.message}`);
     }
   }
 }
@@ -369,19 +259,17 @@ export async function invokeNvidiaVlm(
   try {
     const rawRes = await extractReceiptData(imageDataUri, documentType, modelId, fewShotExamples);
 
-    let documentCategory: string = rawRes.document_category || "";
-    let extractedJson: Record<string, any> = (rawRes.extracted_data && typeof rawRes.extracted_data === 'object')
+    let documentCategory: string = rawRes?.document_category || "";
+    let extractedJson: Record<string, any> = (rawRes?.extracted_data && typeof rawRes.extracted_data === 'object')
       ? rawRes.extracted_data
       : rawRes;
 
-    // Clean out document_category if present in extractedJson
-    if (extractedJson.document_category) {
+    if (extractedJson && extractedJson.document_category) {
       delete extractedJson.document_category;
     }
 
-    // Fast keyword classification fallback if missing or Unknown
     if (!documentCategory || documentCategory === "Unknown") {
-      const fullTextStr = JSON.stringify(rawRes).toLowerCase();
+      const fullTextStr = JSON.stringify(rawRes || {}).toLowerCase();
       if (fullTextStr.includes('cassette') || fullTextStr.includes('dispensed') || fullTextStr.includes('audit')) {
         documentCategory = "Cassette Audit & Cleared";
       } else if (fullTextStr.includes('nik') || fullTextStr.includes('provinsi') || fullTextStr.includes('agama') || fullTextStr.includes('ktp') || fullTextStr.includes('kewarganegaraan')) {
@@ -411,39 +299,6 @@ export async function invokeNvidiaVlm(
 }
 
 /**
- * Safely parse raw VLM content string into a JS object
- */
-function parseContentToJson(content: string): Record<string, any> {
-  if (!content) return generateFallbackVlmExtraction();
-
-  try {
-    // Clean markdown code fence formatting if returned by model
-    let cleaned = content.trim();
-    if (cleaned.startsWith('```')) {
-      cleaned = cleaned.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
-    }
-
-    const parsed = JSON.parse(cleaned);
-    if (typeof parsed === 'object' && parsed !== null) {
-      return parsed;
-    }
-  } catch (err) {
-    console.warn('[NVIDIA VLM] Could not directly JSON.parse content, trying regex extraction...');
-    // Attempt regex extraction of JSON block
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      try {
-        return JSON.parse(jsonMatch[0]);
-      } catch (e) {
-        console.error('[NVIDIA VLM] Regex JSON parse also failed');
-      }
-    }
-  }
-
-  return generateFallbackVlmExtraction();
-}
-
-/**
  * Default fallback extraction for ATM Receipts when API is offline or in trial mode
  */
 export function generateFallbackVlmExtraction(): Record<string, any> {
@@ -468,8 +323,6 @@ export function generateFallbackVlmExtraction(): Record<string, any> {
 
 /**
  * Recursive flattener function to convert nested JSON objects into dot-notation keys
- * e.g., { "TYPE_1": { "CASSETTE": 1999, "REJECTED": 1 } }
- *       -> { "TYPE_1.CASSETTE": 1999, "TYPE_1.REJECTED": 1 }
  */
 export function flattenJsonObject(obj: Record<string, any>, prefix = ''): Record<string, any> {
   const flattened: Record<string, any> = {};
@@ -519,4 +372,3 @@ export function convertVlmJsonToFields(jsonObj: Record<string, any>): any[] {
     category: key.includes('.') ? 'nested_tabular' : 'vlm_discovered'
   }));
 }
-
