@@ -12,6 +12,8 @@ import { Project, ReceiptImage, ActivityLog, PlatformMetrics, TrainingJob } from
 import { apiRateLimiter } from './src/middleware/rateLimiter';
 import { errorHandler } from './src/middleware/errorHandler';
 import projectsV1Router from './src/routes/v1/projects.route';
+import imagesV1Router from './src/routes/v1/images.route';
+import ocrV1Router from './src/routes/v1/ocr.route';
 
 const app = express();
 const PORT = 3000;
@@ -27,6 +29,8 @@ app.use(express.json({ limit: '50mb' }));
 
 // Mount V1 API Routes
 app.use('/api/v1/projects', projectsV1Router);
+app.use('/api/v1/images', imagesV1Router);
+app.use('/api/v1/ocr', ocrV1Router);
 
 // In-Memory Data Store (Initialized with pre-loaded ATM receipts)
 let projectsStore: Project[] = [...INITIAL_PROJECTS];

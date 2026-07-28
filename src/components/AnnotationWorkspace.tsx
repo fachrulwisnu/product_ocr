@@ -79,7 +79,7 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
 
-  // Dual-Engine Client-Side Visual Bounding Boxes (Tesseract.js)
+  // Dual-Engine Client-Side Visual Bounding Boxes (Tesseract.js & Phase 3 NVIDIA Nemotron OCR v2)
   const [visualBoxes, setVisualBoxes] = useState<VisualBBox[]>([]);
   const [showBoundingBoxes, setShowBoundingBoxes] = useState<boolean>(true);
   const [isOcrRunning, setIsOcrRunning] = useState(false);
@@ -87,6 +87,65 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
   const [imageNaturalHeight, setImageNaturalHeight] = useState<number>(880);
   const [hoveredFieldValue, setHoveredFieldValue] = useState<string | null>(null);
   const [hoveredFieldKey, setHoveredFieldKey] = useState<string | null>(null);
+
+  // Phase 3 NVIDIA Nemotron OCR States
+  const [isProcessingNvidiaOcr, setIsProcessingNvidiaOcr] = useState<boolean>(false);
+  const [nvidiaOcrBlocks, setNvidiaOcrBlocks] = useState<any[]>([]);
+  const [rawOcrText, setRawOcrText] = useState<string>('');
+  const [activeRightTab, setActiveRightTab] = useState<'fields' | 'raw_ocr'>('fields');
+
+  // Fetch saved Phase 3 OCR results on image change
+  useEffect(() => {
+    if (!currentImage?.id) return;
+    let isMounted = true;
+
+    const loadSavedOcrResult = async () => {
+      try {
+        const res = await fetch(`/api/v1/ocr/result/${currentImage.id}`);
+        if (res.ok) {
+          const json = await res.json();
+          if (isMounted && json?.data) {
+            setNvidiaOcrBlocks(json.data.blocks || []);
+            setRawOcrText(json.data.ocr_result?.raw_text || '');
+          }
+        }
+      } catch (err) {
+        // silent catch
+      }
+    };
+
+    loadSavedOcrResult();
+    return () => { isMounted = false; };
+  }, [currentImage?.id]);
+
+  // Handler for "Run OCR Extraction (NVIDIA Nemotron v2)"
+  const handleRunNvidiaOcrProcess = async () => {
+    if (!currentImage?.id) return;
+    setIsProcessingNvidiaOcr(true);
+    try {
+      const response = await fetch(`/api/v1/ocr/process/${currentImage.id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageData: currentImage.fileUrl
+        })
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        if (result?.data) {
+          setNvidiaOcrBlocks(result.data.blocks || []);
+          setRawOcrText(result.data.raw_text || '');
+          setActiveRightTab('raw_ocr');
+          setShowBoundingBoxes(true);
+        }
+      }
+    } catch (err) {
+      console.error('NVIDIA OCR Process failed:', err);
+    } finally {
+      setIsProcessingNvidiaOcr(false);
+    }
+  };
 
   const imgRef = useRef<HTMLImageElement>(null);
   const imageContainerRef = useRef<HTMLDivElement>(null);
@@ -565,14 +624,24 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center gap-2 w-full md:w-auto justify-end">
+        <div className="flex items-center gap-2 w-full md:w-auto justify-end flex-wrap">
+          <button
+            onClick={handleRunNvidiaOcrProcess}
+            disabled={isProcessingNvidiaOcr}
+            className="px-3.5 py-1.5 rounded text-xs font-bold uppercase tracking-wider bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1.5 cursor-pointer shadow-md transition-all disabled:opacity-50"
+            title="Run NVIDIA Nemotron OCR v2 extraction and extract bounding boxes"
+          >
+            {isProcessingNvidiaOcr ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 text-emerald-200" />}
+            {isProcessingNvidiaOcr ? 'Running Nemotron OCR...' : 'Run OCR Extraction'}
+          </button>
+
           <button
             onClick={handleReExtractWithFewShot}
             disabled={isReExtractingVlm}
             className="px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wider border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20 flex items-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50"
             title="Re-run VLM with Instant Few-Shot Prompt Injection"
           >
-            {isReExtractingVlm ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 text-indigo-400" />}
+            {isReExtractingVlm ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Bot className="w-3.5 h-3.5 text-indigo-400" />}
             Few-Shot Re-Run
           </button>
 
@@ -701,6 +770,34 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
                 draggable={false}
               />
 
+              {/* Phase 3 NVIDIA Nemotron OCR v2 Bounding Box Overlays */}
+              {showBoundingBoxes && nvidiaOcrBlocks.map((block: any, idx: number) => {
+                const x = block.box_x ?? 10;
+                const y = block.box_y ?? 10;
+                const w = block.box_width ?? 80;
+                const h = block.box_height ?? 5;
+
+                return (
+                  <div
+                    key={`nvidia-ocr-box-${idx}`}
+                    style={{
+                      position: 'absolute',
+                      top: `${y}%`,
+                      left: `${x}%`,
+                      width: `${w}%`,
+                      height: `${h}%`,
+                      boxSizing: 'border-box',
+                      zIndex: 35,
+                    }}
+                    className="border-2 border-emerald-500 bg-emerald-500/20 rounded-xs transition-all pointer-events-auto group hover:bg-emerald-500/40 hover:border-emerald-400 hover:ring-2 hover:ring-emerald-400/60"
+                  >
+                    <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute bottom-full left-0 mb-1 whitespace-nowrap text-[10px] font-mono px-1.5 py-0.5 bg-emerald-600 text-white font-bold rounded shadow-md z-50">
+                      {block.text_content} {block.confidence ? `(${Math.round(block.confidence * 100)}%)` : ''}
+                    </div>
+                  </div>
+                );
+              })}
+
               {/* Client-Side Visual Bounding Boxes (Tesseract.js & VLM Field Matches) */}
               {showBoundingBoxes && imageNaturalWidth > 0 && imageNaturalHeight > 0 && matchedBoxes.map((box) => {
                 const leftPct = (box.x0 / imageNaturalWidth) * 100;
@@ -805,111 +902,184 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
           </div>
         </div>
 
-        {/* RIGHT PANE: Dynamic Field Studio (5 Cols) */}
+        {/* RIGHT PANE: Dynamic Field Studio & Extracted Text Panel (5 Cols) */}
         <div className={`lg:col-span-5 flex flex-col rounded border overflow-hidden ${
           isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
         }`}>
           
-          {/* Header */}
-          <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-            <div>
-              <h2 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
-                <Tag className="w-3.5 h-3.5 text-indigo-500" /> Dynamic Field Studio
-              </h2>
-              <p className="text-[10px] text-slate-500 mt-0.5">
-                Hover over any field to highlight its bounding box on the left canvas.
-              </p>
+          {/* Header with Studio / Raw Text Tabs */}
+          <div className="p-3 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+            <div className="flex items-center gap-1 bg-slate-200 dark:bg-slate-800 p-1 rounded-lg">
+              <button
+                onClick={() => setActiveRightTab('fields')}
+                className={`px-3 py-1 rounded-md text-[11px] font-bold uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1.5 ${
+                  activeRightTab === 'fields'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+                }`}
+              >
+                <Tag className="w-3.5 h-3.5" /> Field Studio ({fieldsState.length})
+              </button>
+
+              <button
+                onClick={() => setActiveRightTab('raw_ocr')}
+                className={`px-3 py-1 rounded-md text-[11px] font-bold uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1.5 ${
+                  activeRightTab === 'raw_ocr'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+                }`}
+              >
+                <FileText className="w-3.5 h-3.5" /> Extracted Text ({nvidiaOcrBlocks.length > 0 ? nvidiaOcrBlocks.length : 'OCR'})
+              </button>
             </div>
 
-            <button
-              onClick={() => setShowAddFieldModal(true)}
-              className="px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1 cursor-pointer shadow-xs"
-            >
-              <Plus className="w-3.5 h-3.5" /> Add Field
-            </button>
-          </div>
-
-          {/* Fields Editable List */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
-            {fieldsState.length === 0 ? (
-              <div className="text-center py-12 text-slate-500 text-xs font-mono space-y-2">
-                <p>No fields extracted yet.</p>
-                <p className="text-[10px] text-indigo-400">Drag a crop rectangle on the receipt to extract with Google Lens!</p>
-              </div>
-            ) : (
-              fieldsState.map((field) => (
-                <div
-                  key={field.id}
-                  onMouseEnter={() => {
-                    setHoveredFieldValue(field.value);
-                    setHoveredFieldKey(field.key);
-                  }}
-                  onMouseLeave={() => {
-                    setHoveredFieldValue(null);
-                    setHoveredFieldKey(null);
-                  }}
-                  className={`p-3 rounded border space-y-2 transition-all ${
-                    hoveredFieldKey === field.key || (hoveredFieldValue === field.value && field.value)
-                      ? 'border-emerald-500 bg-emerald-500/10 dark:bg-emerald-950/30 ring-1 ring-emerald-500/50'
-                      : field.category === 'google_lens_crop' 
-                      ? 'border-indigo-500/50 bg-indigo-950/20 dark:bg-indigo-950/40'
-                      : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 hover:border-slate-300'
-                  }`}
-                >
-                  <div className="grid grid-cols-12 gap-2 items-center">
-                    {/* Left Input: Key Name */}
-                    <div className="col-span-5">
-                      <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between mb-1">
-                        <span>Discovered Key</span>
-                        {field.key.includes('.') ? (
-                          <span className="text-[8px] bg-indigo-500/20 text-indigo-300 px-1 py-0.5 rounded font-mono font-bold border border-indigo-500/30">
-                            Nested {field.key.split('.')[0]}
-                          </span>
-                        ) : field.category === 'google_lens_crop' ? (
-                          <span className="text-[8px] text-indigo-400 font-mono uppercase font-bold">Crop</span>
-                        ) : null}
-                      </label>
-                      <input
-                        ref={(el) => { keyInputRefs.current[field.id] = el; }}
-                        type="text"
-                        value={field.key}
-                        onFocus={() => setFocusedFieldId(field.id)}
-                        onChange={(e) => handleFieldKeyChange(field.id, e.target.value)}
-                        placeholder="NAME_KEY..."
-                        className="w-full px-2.5 py-1.5 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-[11px] font-mono font-bold text-indigo-600 dark:text-indigo-400 focus:outline-hidden"
-                      />
-                    </div>
-
-                    {/* Right Input: Extracted Value */}
-                    <div className="col-span-6">
-                      <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-                        Extracted Value
-                      </label>
-                      <input
-                        type="text"
-                        value={field.value}
-                        onFocus={() => setFocusedFieldId(field.id)}
-                        onChange={(e) => handleFieldValueChange(field.id, e.target.value)}
-                        placeholder="Extracted value..."
-                        className="w-full px-2.5 py-1.5 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-[11px] font-mono text-slate-800 dark:text-slate-100 focus:outline-hidden"
-                      />
-                    </div>
-
-                    {/* Delete Action */}
-                    <div className="col-span-1 flex items-center justify-center pt-4">
-                      <button
-                        onClick={() => handleDeleteField(field.id)}
-                        className="text-slate-400 hover:text-rose-500 p-1 cursor-pointer transition-colors"
-                        title="Delete key-value pair"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))
+            {activeRightTab === 'fields' && (
+              <button
+                onClick={() => setShowAddFieldModal(true)}
+                className="px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1 cursor-pointer shadow-xs"
+              >
+                <Plus className="w-3.5 h-3.5" /> Add Field
+              </button>
             )}
           </div>
+
+          {/* TAB 1: Fields Editable List */}
+          {activeRightTab === 'fields' && (
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              {fieldsState.length === 0 ? (
+                <div className="text-center py-12 text-slate-500 text-xs font-mono space-y-2">
+                  <p>No fields extracted yet.</p>
+                  <p className="text-[10px] text-indigo-400">Drag a crop rectangle on the receipt to extract with Google Lens!</p>
+                </div>
+              ) : (
+                fieldsState.map((field) => (
+                  <div
+                    key={field.id}
+                    onMouseEnter={() => {
+                      setHoveredFieldValue(field.value);
+                      setHoveredFieldKey(field.key);
+                    }}
+                    onMouseLeave={() => {
+                      setHoveredFieldValue(null);
+                      setHoveredFieldKey(null);
+                    }}
+                    className={`p-3 rounded border space-y-2 transition-all ${
+                      hoveredFieldKey === field.key || (hoveredFieldValue === field.value && field.value)
+                        ? 'border-emerald-500 bg-emerald-500/10 dark:bg-emerald-950/30 ring-1 ring-emerald-500/50'
+                        : field.category === 'google_lens_crop' 
+                        ? 'border-indigo-500/50 bg-indigo-950/20 dark:bg-indigo-950/40'
+                        : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="grid grid-cols-12 gap-2 items-center">
+                      {/* Left Input: Key Name */}
+                      <div className="col-span-5">
+                        <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between mb-1">
+                          <span>Discovered Key</span>
+                          {field.key.includes('.') ? (
+                            <span className="text-[8px] bg-indigo-500/20 text-indigo-300 px-1 py-0.5 rounded font-mono font-bold border border-indigo-500/30">
+                              Nested {field.key.split('.')[0]}
+                            </span>
+                          ) : field.category === 'google_lens_crop' ? (
+                            <span className="text-[8px] text-indigo-400 font-mono uppercase font-bold">Crop</span>
+                          ) : null}
+                        </label>
+                        <input
+                          ref={(el) => { keyInputRefs.current[field.id] = el; }}
+                          type="text"
+                          value={field.key}
+                          onFocus={() => setFocusedFieldId(field.id)}
+                          onChange={(e) => handleFieldKeyChange(field.id, e.target.value)}
+                          placeholder="NAME_KEY..."
+                          className="w-full px-2.5 py-1.5 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-[11px] font-mono font-bold text-indigo-600 dark:text-indigo-400 focus:outline-hidden"
+                        />
+                      </div>
+
+                      {/* Right Input: Extracted Value */}
+                      <div className="col-span-6">
+                        <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                          Extracted Value
+                        </label>
+                        <input
+                          type="text"
+                          value={field.value}
+                          onFocus={() => setFocusedFieldId(field.id)}
+                          onChange={(e) => handleFieldValueChange(field.id, e.target.value)}
+                          placeholder="Extracted value..."
+                          className="w-full px-2.5 py-1.5 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-[11px] font-mono text-slate-800 dark:text-slate-100 focus:outline-hidden"
+                        />
+                      </div>
+
+                      {/* Delete Action */}
+                      <div className="col-span-1 flex items-center justify-center pt-4">
+                        <button
+                          onClick={() => handleDeleteField(field.id)}
+                          className="text-slate-400 hover:text-rose-500 p-1 cursor-pointer transition-colors"
+                          title="Delete key-value pair"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {/* TAB 2: Extracted Text Panel (NVIDIA Nemotron OCR v2 Line-by-Line) */}
+          {activeRightTab === 'raw_ocr' && (
+            <div className="flex-1 overflow-y-auto p-4 space-y-3 font-mono text-xs">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
+                <span className="text-[10px] font-bold uppercase text-emerald-500 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5" /> NVIDIA Nemotron OCR v2 Text Engine
+                </span>
+                <span className="text-[10px] text-slate-400">
+                  {nvidiaOcrBlocks.length} Bounding Boxes
+                </span>
+              </div>
+
+              {nvidiaOcrBlocks.length === 0 ? (
+                <div className="text-center py-12 space-y-3">
+                  <p className="text-slate-400">No OCR extraction performed yet.</p>
+                  <button
+                    onClick={handleRunNvidiaOcrProcess}
+                    disabled={isProcessingNvidiaOcr}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-bold uppercase tracking-wider inline-flex items-center gap-2 cursor-pointer shadow-md"
+                  >
+                    {isProcessingNvidiaOcr ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                    Run OCR Extraction Now
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="p-3 bg-slate-950 text-emerald-400 rounded-lg border border-slate-800 space-y-1.5">
+                    <div className="text-[10px] font-bold uppercase text-slate-500 tracking-wider mb-2">Line-by-Line Raw Extracted Output:</div>
+                    {nvidiaOcrBlocks.map((block: any, idx: number) => (
+                      <div key={`ocr-line-${idx}`} className="flex items-start justify-between gap-2 p-1.5 hover:bg-slate-900 rounded border border-transparent hover:border-emerald-500/30 transition-colors">
+                        <span className="text-slate-500 text-[10px] w-6 select-none">{idx + 1}.</span>
+                        <span className="flex-1 font-semibold text-slate-100">{block.text_content}</span>
+                        {block.confidence && (
+                          <span className="text-[9px] text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded font-bold">
+                            {Math.round(block.confidence * 100)}%
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  {rawOcrText && (
+                    <div className="p-3 bg-slate-100 dark:bg-slate-950/60 rounded-lg border border-slate-200 dark:border-slate-800">
+                      <div className="text-[10px] font-bold uppercase text-slate-500 mb-1">Combined Raw Output String:</div>
+                      <pre className="text-[11px] text-slate-700 dark:text-slate-300 whitespace-pre-wrap font-mono leading-relaxed">
+                        {rawOcrText}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Footer Action Panel */}
           <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 space-y-3">
