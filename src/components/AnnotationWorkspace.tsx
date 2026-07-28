@@ -417,7 +417,7 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
     if (!currentImage.fileUrl) return;
     setIsReExtractingVlm(true);
     try {
-      const vlmRes = await invokeNvidiaVlm(currentImage.fileUrl, currentImage.receiptType);
+      const vlmRes = await invokeNvidiaVlm(currentImage.fileUrl, currentImage.receiptType, fewShotExamples);
       if (vlmRes.documentCategory && currentImage) {
         currentImage.receiptType = vlmRes.documentCategory;
       }
@@ -861,9 +861,13 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
                     <div className="col-span-5">
                       <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between mb-1">
                         <span>Discovered Key</span>
-                        {field.category === 'google_lens_crop' && (
+                        {field.key.includes('.') ? (
+                          <span className="text-[8px] bg-indigo-500/20 text-indigo-300 px-1 py-0.5 rounded font-mono font-bold border border-indigo-500/30">
+                            Nested {field.key.split('.')[0]}
+                          </span>
+                        ) : field.category === 'google_lens_crop' ? (
                           <span className="text-[8px] text-indigo-400 font-mono uppercase font-bold">Crop</span>
-                        )}
+                        ) : null}
                       </label>
                       <input
                         ref={(el) => { keyInputRefs.current[field.id] = el; }}

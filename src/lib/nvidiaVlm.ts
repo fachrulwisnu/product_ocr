@@ -30,26 +30,34 @@ export async function extractFullReceipt(
     formattedImageUrl = `data:image/png;base64,${base64Image}`;
   }
 
-  const docCategory = documentType || "Document";
-  let promptText = `Analyze the uploaded image and extract all key-value details. 
-Identify the type of document and include it in the JSON output under the key "document_category". 
-Possible categories are: "KTP (Indonesian ID)", "ATM Receipt", "Invoice", "Tax Document (NPWP)", "Passport", or "Unknown".
+  const systemPrompt = `You are an expert Data Engineer parsing thermal ATM Cassette Audit and Replenishment receipts (e.g., MNC, BRI, Permata, OCBC) and documents.
+The image contains tabular data where rows (e.g., CASSETTE, REJECTED, REMAINING, DISPENSED, TOTAL or Denominations like 100K, 50K) intersect with columns (e.g., TYPE 1, TYPE 2, INIT, DISP, DEP, REM).
+
+CRITICAL INSTRUCTIONS:
+1. Spatial Alignment: Read line by line. Carefully trace the vertical alignment of numbers to their correct header columns.
+2. Nested Output: Structure tabular data hierarchically. Use Column Headers (or Cassette Types) as primary keys, and row labels as secondary keys.
+3. Example Format for Cassette Types:
+   "TYPE_1": { "CASSETTE": 1999, "REJECTED": 1, "REMAINING": 2000, "DISPENSED": 0, "TOTAL": 2000 }
+4. Example Format for Denominations (BRI/SMBC):
+   "IDR_100K_RC2": { "INIT": 250, "DISP": 3251, "DEP": 3392, "REM": 358 }
+5. Global Fields: Extract general data like "document_category", "LAST_CLEARED_DATE", "MACHINE_ID", "ACTIVITY_COUNT", or "INIT_AMOUNT" at the root level of the JSON.
+6. Return ONLY a valid JSON object. No markdown, no conversational text.
+
+Identify the document type under "document_category" (e.g., "Cassette Audit & Cleared", "KTP (Indonesian ID)", "ATM Receipt", "Invoice", "Tax Document (NPWP)", "Passport", or "Unknown").
 
 Return strictly in this JSON format:
 {
-  "document_category": "KTP (Indonesian ID)",
+  "document_category": "${documentType || "ATM Receipt"}",
   "extracted_data": {
-     // ... extracted key-values here
+     // ... extracted key-values and nested objects here
   }
 }`;
 
-  if (fewShotExamples && fewShotExamples.length > 0) {
-    promptText += "\n\nHere are verified examples of expected key-value extraction structure for this project format:\n";
-    fewShotExamples.slice(0, 5).forEach((ex, i) => {
-      promptText += `Example ${i + 1}:\n${JSON.stringify(ex, null, 2)}\n`;
-    });
-    promptText += "\nPlease align your key names and formatting with these verified examples where applicable.";
-  }
+  const fewShotContext = (fewShotExamples && fewShotExamples.length > 0)
+    ? `\n\nHere are historical verified examples of similar receipts to guide your formatting (Instant Learning):\n${JSON.stringify(fewShotExamples.slice(0, 5), null, 2)}`
+    : "";
+
+  const finalPromptText = `${systemPrompt}\n\n${fewShotContext}`;
 
   const payload = {
     "model": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
@@ -64,7 +72,7 @@ Return strictly in this JSON format:
         "content": [
           {
             "type": "text",
-            "text": promptText
+            "text": finalPromptText
           },
           {
             "type": "image_url",
@@ -149,9 +157,10 @@ export async function extractCroppedRegion(croppedBase64: string): Promise<strin
 
 export async function extractReceiptData(
   base64Image: string, 
-  documentType: string = "ATM Cash Withdrawal"
+  documentType: string = "ATM Cash Withdrawal",
+  fewShotExamples: Record<string, any>[] = []
 ): Promise<Record<string, any>> {
-  return extractFullReceipt(base64Image, [], documentType);
+  return extractFullReceipt(base64Image, fewShotExamples, documentType);
 }
 
 export interface VlmExtractionResponse {
@@ -167,11 +176,12 @@ export interface VlmExtractionResponse {
  */
 export async function invokeNvidiaVlm(
   imageDataUri: string, 
-  documentType: string = "ATM Cash Withdrawal"
+  documentType: string = "ATM Cash Withdrawal",
+  fewShotExamples: Record<string, any>[] = []
 ): Promise<VlmExtractionResponse> {
   const startTime = Date.now();
   try {
-    const rawRes = await extractReceiptData(imageDataUri, documentType);
+    const rawRes = await extractReceiptData(imageDataUri, documentType, fewShotExamples);
 
     let documentCategory: string = rawRes.document_category || "";
     let extractedJson: Record<string, any> = (rawRes.extracted_data && typeof rawRes.extracted_data === 'object')
@@ -186,7 +196,9 @@ export async function invokeNvidiaVlm(
     // Fast keyword classification fallback if missing or Unknown
     if (!documentCategory || documentCategory === "Unknown") {
       const fullTextStr = JSON.stringify(rawRes).toLowerCase();
-      if (fullTextStr.includes('nik') || fullTextStr.includes('provinsi') || fullTextStr.includes('agama') || fullTextStr.includes('ktp') || fullTextStr.includes('kewarganegaraan')) {
+      if (fullTextStr.includes('cassette') || fullTextStr.includes('dispensed') || fullTextStr.includes('audit')) {
+        documentCategory = "Cassette Audit & Cleared";
+      } else if (fullTextStr.includes('nik') || fullTextStr.includes('provinsi') || fullTextStr.includes('agama') || fullTextStr.includes('ktp') || fullTextStr.includes('kewarganegaraan')) {
         documentCategory = "KTP (Indonesian ID)";
       } else if (fullTextStr.includes('atm') || fullTextStr.includes('tarik') || fullTextStr.includes('saldo') || fullTextStr.includes('withdrawal') || fullTextStr.includes('bank')) {
         documentCategory = "ATM Receipt";
@@ -269,6 +281,39 @@ export function generateFallbackVlmExtraction(): Record<string, any> {
 }
 
 /**
+ * Recursive flattener function to convert nested JSON objects into dot-notation keys
+ * e.g., { "TYPE_1": { "CASSETTE": 1999, "REJECTED": 1 } }
+ *       -> { "TYPE_1.CASSETTE": 1999, "TYPE_1.REJECTED": 1 }
+ */
+export function flattenJsonObject(obj: Record<string, any>, prefix = ''): Record<string, any> {
+  const flattened: Record<string, any> = {};
+  if (!obj || typeof obj !== 'object') return flattened;
+
+  for (const [key, val] of Object.entries(obj)) {
+    if (key === 'document_category') continue;
+
+    const formattedKey = key.toUpperCase().replace(/\s+/g, '_');
+    const fullKey = prefix ? `${prefix}.${formattedKey}` : formattedKey;
+
+    if (val !== null && typeof val === 'object' && !Array.isArray(val)) {
+      Object.assign(flattened, flattenJsonObject(val, fullKey));
+    } else if (Array.isArray(val)) {
+      val.forEach((item, idx) => {
+        if (item !== null && typeof item === 'object') {
+          Object.assign(flattened, flattenJsonObject(item, `${fullKey}_${idx + 1}`));
+        } else {
+          flattened[`${fullKey}_${idx + 1}`] = item;
+        }
+      });
+    } else {
+      flattened[fullKey] = val;
+    }
+  }
+
+  return flattened;
+}
+
+/**
  * Convert dynamic JSON extracted by VLM into UI ExtractedField list
  */
 export function convertVlmJsonToFields(jsonObj: Record<string, any>): any[] {
@@ -276,16 +321,16 @@ export function convertVlmJsonToFields(jsonObj: Record<string, any>): any[] {
     ? jsonObj.extracted_data
     : jsonObj;
 
-  return Object.entries(data)
-    .filter(([key]) => key !== 'document_category')
-    .map(([key, val], idx) => ({
-      id: `field-vlm-${idx}-${Date.now()}`,
-      key: key.toUpperCase().replace(/\s+/g, '_'),
-      label: key.replace(/_/g, ' '),
-      value: String(val ?? ''),
-      confidence: 0.95,
-      status: 'predicted',
-      category: 'vlm_discovered'
-    }));
+  const flattenedData = flattenJsonObject(data);
+
+  return Object.entries(flattenedData).map(([key, val], idx) => ({
+    id: `field-vlm-${idx}-${Date.now()}`,
+    key: key,
+    label: key.replace(/_/g, ' '),
+    value: String(val ?? ''),
+    confidence: 0.95,
+    status: 'predicted',
+    category: key.includes('.') ? 'nested_tabular' : 'vlm_discovered'
+  }));
 }
 
