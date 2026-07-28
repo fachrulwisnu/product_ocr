@@ -90,6 +90,11 @@ export async function extractReceiptData(
   // ROUTE B: NEMOTRON NANO VL 8B (DOCUMENTS, INVOICES, PDF, XLSX, CSV)
   // ---------------------------------------------------------
   else if (modelId === 'nvidia/llama-3.1-nemotron-nano-vl-8b-v1') {
+    // Validate that the base64 string is actually an image format supported by the vision model
+    if (!base64Image.startsWith('data:image/')) {
+      throw new Error("Invalid file format. The Nemotron Nano VL model requires an image file (JPEG or PNG). Please convert your PDF/document page to an image before uploading.");
+    }
+
     const invokeUrl = "https://integrate.api.nvidia.com/v1/chat/completions";
     const headers = {
       "Authorization": "Bearer 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",
@@ -97,10 +102,10 @@ export async function extractReceiptData(
       "Content-Type": "application/json"
     };
 
-    let systemPrompt = `You are an expert document and invoice processing engine. Extract all line items, totals, dates, and metadata from this ${documentCategory} into a clean JSON object. Return ONLY the raw JSON object without markdown formatting.`;
+    let systemPrompt = `You are an expert document and invoice processing engine. Extract all line items, totals, dates, and metadata from this Invoice into a clean JSON object. Return ONLY the raw JSON object without markdown formatting.`;
 
     if (GOLDEN_TEMPLATES[documentCategory]) {
-      systemPrompt = `${systemPrompt} STRICT SCHEMA RULE:${GOLDEN_TEMPLATES[documentCategory]}`;
+      systemPrompt = `${systemPrompt} STRICT SCHEMA RULE: ${GOLDEN_TEMPLATES[documentCategory]}`;
     }
 
     const payload = {
@@ -110,7 +115,7 @@ export async function extractReceiptData(
         { 
           role: "user", 
           content: [
-            { type: "text", text: "Extract structured data from this document/invoice." },
+            { type: "text", text: "Extract structured data from this document/invoice image." },
             { type: "image_url", image_url: { url: fullDataUrl } }
           ] 
         }
@@ -126,8 +131,8 @@ export async function extractReceiptData(
       const response = await axios.post(invokeUrl, payload, { headers, timeout: 90000 });
       const extractedText = response.data.choices[0].message.content;
       return JSON.parse(extractedText.replace(/```json/g, '').replace(/```/g, '').trim());
-    } catch (error) {
-      console.error("Nemotron Nano VL 8B Error:", error);
+    } catch (error: any) {
+      console.error("Nemotron Nano VL 8B Error:", error.response?.data || error.message);
       throw error;
     }
   }
