@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ReceiptImage, ExtractedField } from '../types';
 import { 
   ZoomIn, 
@@ -12,9 +12,14 @@ import {
   Sparkles,
   Bot,
   Database,
-  Tag
+  Tag,
+  Crop,
+  Loader2,
+  AlertCircle,
+  BrainCircuit
 } from 'lucide-react';
-import { saveVlmExtraction, updateDynamicLabels } from '../lib/supabaseClient';
+import { extractCroppedRegion, extractFullReceipt, convertVlmJsonToFields } from '../lib/nvidiaVlm';
+import { saveVerifiedExtraction, fetchFewShotExamples } from '../lib/supabaseClient';
 
 interface AnnotationWorkspaceProps {
   images: ReceiptImage[];
@@ -37,21 +42,42 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
   // Viewer Controls State
   const [zoomLevel, setZoomLevel] = useState(1);
   const [rotation, setRotation] = useState(0);
-  const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
 
   // Editable Dynamic Key-Value Pairs State
   const [fieldsState, setFieldsState] = useState<ExtractedField[]>(currentImage ? currentImage.fields : []);
   const [newFieldKey, setNewFieldKey] = useState('');
   const [newFieldValue, setNewFieldValue] = useState('');
   const [showAddFieldModal, setShowAddFieldModal] = useState(false);
+
+  // Persistence & Few-Shot State
   const [isSavingSupabase, setIsSavingSupabase] = useState(false);
   const [saveNotification, setSaveNotification] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [fewShotExamples, setFewShotExamples] = useState<Record<string, any>[]>([]);
+  const [isReExtractingVlm, setIsReExtractingVlm] = useState(false);
 
-  // Sync state when selected image changes
-  React.useEffect(() => {
+  // Google Lens Drag-to-Crop State
+  const [isCroppingVlm, setIsCroppingVlm] = useState(false);
+  const [dragRect, setDragRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
+
+  const imgRef = useRef<HTMLImageElement>(null);
+  const imageContainerRef = useRef<HTMLDivElement>(null);
+
+  // Sync state & fetch Few-Shot Examples when selected image changes
+  useEffect(() => {
     if (selectedImage) {
       setFieldsState(selectedImage.fields);
-      setSelectedFieldId(selectedImage.fields[0]?.id || null);
+      setSaveError(null);
+      setSaveNotification(null);
+
+      // Load 3-5 verified examples from Supabase few_shot_library
+      fetchFewShotExamples(selectedImage.projectId, 5)
+        .then(examples => {
+          setFewShotExamples(examples);
+        })
+        .catch(err => console.warn('Could not fetch few shot examples:', err));
     }
   }, [selectedImage]);
 
@@ -62,6 +88,89 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
       </div>
     );
   }
+
+  // Google Lens Drag-to-Select Crop Handlers
+  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!imgRef.current) return;
+    const rect = imgRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    if (x >= 0 && x <= rect.width && y >= 0 && y <= rect.height) {
+      setIsDragging(true);
+      setDragStart({ x, y });
+      setDragRect({ x, y, width: 0, height: 0 });
+    }
+  };
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isDragging || !dragStart || !imgRef.current) return;
+    const rect = imgRef.current.getBoundingClientRect();
+    const currentX = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+    const currentY = Math.max(0, Math.min(e.clientY - rect.top, rect.height));
+
+    const x = Math.min(dragStart.x, currentX);
+    const y = Math.min(dragStart.y, currentY);
+    const width = Math.abs(currentX - dragStart.x);
+    const height = Math.abs(currentY - dragStart.y);
+
+    setDragRect({ x, y, width, height });
+  };
+
+  const handleMouseUp = async () => {
+    if (!isDragging || !dragRect || !imgRef.current) {
+      setIsDragging(false);
+      return;
+    }
+    setIsDragging(false);
+
+    // If drag area is larger than 10x10 px, crop and invoke VLM
+    if (dragRect.width > 10 && dragRect.height > 10) {
+      const img = imgRef.current;
+      const scaleX = img.naturalWidth / img.clientWidth;
+      const scaleY = img.naturalHeight / img.clientHeight;
+
+      const sx = dragRect.x * scaleX;
+      const sy = dragRect.y * scaleY;
+      const sw = dragRect.width * scaleX;
+      const sh = dragRect.height * scaleY;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = sw;
+      canvas.height = sh;
+      const ctx = canvas.getContext('2d');
+
+      if (ctx) {
+        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+        const croppedBase64 = canvas.toDataURL('image/png');
+
+        setIsCroppingVlm(true);
+        try {
+          const extractedCropValue = await extractCroppedRegion(croppedBase64);
+          
+          // Auto-add new row to Dynamic Field Studio: empty Key, pre-filled Value
+          const newCroppedField: ExtractedField = {
+            id: `field-crop-${Date.now()}`,
+            key: '', // Left side empty key for user to define
+            label: 'New Cropped Field',
+            value: extractedCropValue || '',
+            confidence: 0.99,
+            status: 'manual_added',
+            category: 'google_lens_crop'
+          };
+
+          setFieldsState(prev => [...prev, newCroppedField]);
+        } catch (err) {
+          console.error('Cropped region extraction failed:', err);
+        } finally {
+          setIsCroppingVlm(false);
+        }
+      }
+    }
+
+    setDragRect(null);
+    setDragStart(null);
+  };
 
   // Handle Field Value Change
   const handleFieldValueChange = (fieldId: string, val: string) => {
@@ -103,49 +212,63 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
     setFieldsState(prev => prev.filter(f => f.id !== fieldId));
   };
 
-  // Approve & Save (With Supabase Persistence)
+  // Re-run VLM with Few-Shot Prompt Injection
+  const handleReExtractWithFewShot = async () => {
+    if (!currentImage.fileUrl) return;
+    setIsReExtractingVlm(true);
+    try {
+      const extractedJson = await extractFullReceipt(currentImage.fileUrl, fewShotExamples);
+      const newFields = convertVlmJsonToFields(extractedJson);
+      if (newFields.length > 0) {
+        setFieldsState(newFields);
+      }
+    } catch (err) {
+      console.error('Few-Shot Re-extraction failed:', err);
+    } finally {
+      setIsReExtractingVlm(false);
+    }
+  };
+
+  // TASK 1 & TASK 2: VERIFY & SAVE with Explicit Try/Catch & Error Toasts
   const handleApprove = async () => {
     setIsSavingSupabase(true);
+    setSaveError(null);
+    setSaveNotification(null);
 
-    // Convert fields state to clean JSON object for Supabase
+    // Convert fields state to clean JSON object
     const jsonExtraction: Record<string, any> = {};
-    const labelKeys: string[] = [];
-
     fieldsState.forEach(f => {
-      if (f.key) {
-        jsonExtraction[f.key] = f.value;
-        labelKeys.push(f.key);
+      if (f.key && f.key.trim()) {
+        jsonExtraction[f.key.trim().toUpperCase()] = f.value;
       }
     });
 
     try {
-      // 1. Save VLM Extraction to vlm_results in Supabase
-      await saveVlmExtraction(
+      // 1. Call saveVerifiedExtraction which inserts to vlm_results, dynamic_labels, and few_shot_library
+      await saveVerifiedExtraction(
+        currentImage.projectId,
         currentImage.id,
-        jsonExtraction,
-        JSON.stringify(jsonExtraction, null, 2),
-        1250,
-        'NVIDIA_NEMOTRON'
+        jsonExtraction
       );
 
-      // 2. Update dynamic_labels table in Supabase
-      await updateDynamicLabels(currentImage.projectId, labelKeys);
+      // Toast Success ONLY fires at the end of the try block
+      setSaveNotification('Saved to Supabase & Added to Few-Shot Learning Library!');
+      setTimeout(() => setSaveNotification(null), 4000);
 
-      setSaveNotification('Saved to Supabase & Verified!');
-      setTimeout(() => setSaveNotification(null), 3000);
-    } catch (err) {
-      console.warn('Saved locally (Supabase offline/not configured)');
+      // Update parent handler
+      onSaveLabels(currentImage.id, fieldsState, 'approved');
+
+      // Move to next image if available
+      const nextIdx = images.findIndex(i => i.id === currentImage.id) + 1;
+      if (nextIdx < images.length) {
+        setSelectedImage(images[nextIdx]);
+      }
+    } catch (err: any) {
+      console.error('Verification & Save Error:', err);
+      // Catch block MUST trigger error message
+      setSaveError(err?.message || 'Failed to persist to Supabase database.');
     } finally {
       setIsSavingSupabase(false);
-    }
-
-    // Call parent handler
-    onSaveLabels(currentImage.id, fieldsState, 'approved');
-
-    // Move to next image if available
-    const nextIdx = images.findIndex(i => i.id === currentImage.id) + 1;
-    if (nextIdx < images.length) {
-      setSelectedImage(images[nextIdx]);
     }
   };
 
@@ -162,7 +285,7 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
         isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
       }`}>
         {/* Document Switcher */}
-        <div className="flex items-center gap-3 w-full md:w-auto">
+        <div className="flex items-center gap-3 w-full md:w-auto flex-wrap">
           <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Document:</span>
           <select
             value={currentImage.id}
@@ -187,15 +310,37 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
             {currentImage.status}
           </span>
 
+          {fewShotExamples.length > 0 && (
+            <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center gap-1">
+              <BrainCircuit className="w-3 h-3 text-indigo-400" /> Few-Shot Active ({fewShotExamples.length} samples)
+            </span>
+          )}
+
           {saveNotification && (
             <span className="text-xs font-bold text-emerald-500 animate-pulse flex items-center gap-1">
               <Database className="w-3.5 h-3.5" /> {saveNotification}
+            </span>
+          )}
+
+          {saveError && (
+            <span className="text-xs font-bold text-rose-500 flex items-center gap-1">
+              <AlertCircle className="w-3.5 h-3.5" /> Error: {saveError}
             </span>
           )}
         </div>
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2 w-full md:w-auto justify-end">
+          <button
+            onClick={handleReExtractWithFewShot}
+            disabled={isReExtractingVlm}
+            className="px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wider border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20 flex items-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50"
+            title="Re-run VLM with Instant Few-Shot Prompt Injection"
+          >
+            {isReExtractingVlm ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 text-indigo-400" />}
+            Few-Shot Re-Run
+          </button>
+
           <button
             onClick={handleReject}
             className="px-3.5 py-1.5 rounded text-xs font-bold uppercase tracking-wider border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 flex items-center gap-1.5 cursor-pointer transition-colors"
@@ -217,7 +362,7 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
             disabled={isSavingSupabase}
             className="px-4 py-1.5 rounded text-xs font-bold uppercase tracking-wider bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1.5 cursor-pointer shadow-md transition-all disabled:opacity-50"
           >
-            <CheckCircle2 className="w-4 h-4" />
+            {isSavingSupabase ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
             {isSavingSupabase ? 'SAVING TO SUPABASE...' : 'VERIFY & SAVE'}
           </button>
         </div>
@@ -226,12 +371,12 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
       {/* Main Dual-Pane Studio Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[720px]">
         
-        {/* LEFT PANE: Interactive High-Res Receipt Image Viewer (7 Cols) */}
+        {/* LEFT PANE: Interactive High-Res Receipt Image Viewer with Google Lens Crop (7 Cols) */}
         <div className={`lg:col-span-7 flex flex-col rounded border overflow-hidden ${
           isDarkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-200 border-slate-200'
         }`}>
           
-          {/* Canvas Zoom Toolbar */}
+          {/* Canvas Zoom & Google Lens Toolbar */}
           <div className={`h-12 border-b flex items-center justify-between px-4 text-xs ${
             isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-200' : 'bg-white/80 backdrop-blur-sm border-slate-200 text-slate-800'
           }`}>
@@ -266,14 +411,27 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
               </button>
             </div>
 
-            <div className="flex items-center gap-1.5 text-indigo-400 font-mono text-[11px] font-bold">
-              <Bot className="w-4 h-4" />
-              <span>NVIDIA Nemotron 30B VLM</span>
+            <div className="flex items-center gap-2">
+              {isCroppingVlm && (
+                <span className="text-[10px] text-indigo-400 font-mono flex items-center gap-1 animate-pulse">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> VLM Reading Region Crop...
+                </span>
+              )}
+              <div className="flex items-center gap-1.5 text-indigo-400 font-mono text-[11px] font-bold">
+                <Crop className="w-4 h-4 text-indigo-400" />
+                <span>Google Lens Crop Selection</span>
+              </div>
             </div>
           </div>
 
-          {/* Canvas Image Display */}
-          <div className="flex-1 overflow-auto p-8 flex items-center justify-center relative select-none bg-slate-300 dark:bg-slate-950">
+          {/* Canvas Image Display with Drag-to-Select Google Lens Crop Overlay */}
+          <div 
+            ref={imageContainerRef}
+            className="flex-1 overflow-auto p-8 flex items-center justify-center relative select-none bg-slate-300 dark:bg-slate-950 cursor-crosshair"
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+          >
             <div 
               className="relative transition-transform duration-200 origin-center"
               style={{
@@ -282,22 +440,41 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
               }}
             >
               <img
+                ref={imgRef}
                 src={currentImage.fileUrl}
                 alt={currentImage.fileName}
-                className="w-full h-auto rounded shadow-2xl border border-slate-300 dark:border-slate-700"
+                className="w-full h-auto rounded shadow-2xl border border-slate-300 dark:border-slate-700 pointer-events-none select-none"
+                draggable={false}
               />
+
+              {/* Bounding Box Selection Drag Overlay */}
+              {dragRect && (
+                <div 
+                  className="absolute border-2 border-indigo-500 bg-indigo-500/20 rounded-xs pointer-events-none shadow-lg transition-all"
+                  style={{
+                    left: `${dragRect.x}px`,
+                    top: `${dragRect.y}px`,
+                    width: `${dragRect.width}px`,
+                    height: `${dragRect.height}px`
+                  }}
+                >
+                  <div className="absolute -top-5 left-0 bg-indigo-600 text-white text-[9px] font-mono px-1.5 py-0.5 rounded font-bold uppercase tracking-wider flex items-center gap-1">
+                    <Crop className="w-2.5 h-2.5" /> Crop Region
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
           <div className="p-2.5 bg-slate-900 text-slate-400 text-[10px] font-mono flex items-center justify-between border-t border-slate-800 px-4">
             <span className="flex items-center gap-1">
-              <Sparkles className="w-3 h-3 text-indigo-400" /> VLM Direct Reasoning Active
+              <Crop className="w-3 h-3 text-indigo-400" /> Google Lens Mode: Click & drag over any text region to crop & extract
             </span>
-            <span className="text-indigo-300">Unsupervised key-value discovery without spatial boxes</span>
+            <span className="text-indigo-300">NVIDIA Nemotron 30B VLM</span>
           </div>
         </div>
 
-        {/* RIGHT PANE: Dynamic Field Definition (5 Cols) */}
+        {/* RIGHT PANE: Dynamic Field Studio (5 Cols) */}
         <div className={`lg:col-span-5 flex flex-col rounded border overflow-hidden ${
           isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
         }`}>
@@ -309,7 +486,7 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
                 <Tag className="w-3.5 h-3.5 text-indigo-500" /> Dynamic Field Studio
               </h2>
               <p className="text-[10px] text-slate-500 mt-0.5">
-                VLM extracted dynamic keys & values. Edit both sides freely.
+                Dynamic VLM key-value extractions. Edit keys & values freely.
               </p>
             </div>
 
@@ -324,26 +501,34 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
           {/* Fields Editable List */}
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
             {fieldsState.length === 0 ? (
-              <div className="text-center py-12 text-slate-500 text-xs font-mono">
-                No fields extracted yet. Click "Add Field" to define a dynamic key-value pair.
+              <div className="text-center py-12 text-slate-500 text-xs font-mono space-y-2">
+                <p>No fields extracted yet.</p>
+                <p className="text-[10px] text-indigo-400">Drag a crop rectangle on the receipt to extract with Google Lens!</p>
               </div>
             ) : (
               fieldsState.map((field) => (
                 <div
                   key={field.id}
-                  className="p-3 rounded border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 space-y-2 hover:border-slate-300 transition-all"
+                  className={`p-3 rounded border space-y-2 transition-all ${
+                    field.category === 'google_lens_crop' 
+                      ? 'border-indigo-500/50 bg-indigo-950/20 dark:bg-indigo-950/40'
+                      : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 hover:border-slate-300'
+                  }`}
                 >
                   <div className="grid grid-cols-12 gap-2 items-center">
                     {/* Left Input: Key Name */}
                     <div className="col-span-5">
-                      <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-                        Discovered Key
+                      <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between mb-1">
+                        <span>Discovered Key</span>
+                        {field.category === 'google_lens_crop' && (
+                          <span className="text-[8px] text-indigo-400 font-mono uppercase font-bold">Crop</span>
+                        )}
                       </label>
                       <input
                         type="text"
                         value={field.key}
                         onChange={(e) => handleFieldKeyChange(field.id, e.target.value)}
-                        placeholder="KEY_NAME"
+                        placeholder="NAME_KEY..."
                         className="w-full px-2.5 py-1.5 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-[11px] font-mono font-bold text-indigo-600 dark:text-indigo-400 focus:outline-hidden"
                       />
                     </div>
@@ -390,9 +575,9 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
               <button
                 onClick={handleApprove}
                 disabled={isSavingSupabase}
-                className="flex-[2] py-2.5 bg-indigo-600 text-white text-xs font-bold rounded shadow-lg shadow-indigo-500/20 hover:bg-indigo-700 transition-colors uppercase tracking-wider cursor-pointer flex items-center justify-center gap-1.5"
+                className="flex-[2] py-2.5 bg-indigo-600 text-white text-xs font-bold rounded shadow-lg shadow-indigo-500/20 hover:bg-indigo-700 transition-colors uppercase tracking-wider cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
               >
-                <CheckCircle2 className="w-4 h-4" />
+                {isSavingSupabase ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
                 VERIFY & SAVE
               </button>
             </div>

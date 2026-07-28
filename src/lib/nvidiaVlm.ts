@@ -9,7 +9,10 @@ import axios from 'axios';
 // Hardcoded NVIDIA API Key as requested by project specifications
 export const HARDCODED_NVIDIA_API_KEY = "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";
 
-export async function extractReceiptData(base64Image: string): Promise<Record<string, any>> {
+export async function extractFullReceipt(
+  base64Image: string, 
+  fewShotExamples: Record<string, any>[] = []
+): Promise<Record<string, any>> {
   const invokeUrl = "https://integrate.api.nvidia.com/v1/chat/completions";
   const stream = false;
 
@@ -26,6 +29,16 @@ export async function extractReceiptData(base64Image: string): Promise<Record<st
     formattedImageUrl = `data:image/png;base64,${base64Image}`;
   }
 
+  let promptText = "Extract all transaction details from this ATM receipt into a clean JSON object. Dynamically name the keys based on the context (e.g., ATM_LOCATION, WITHDRAWAL_AMOUNT, RECORD_NUMBER, AVAILABLE_BALANCE). Return ONLY the raw JSON object, without any markdown formatting, backticks, or conversational text.";
+
+  if (fewShotExamples && fewShotExamples.length > 0) {
+    promptText += "\n\nHere are verified examples of expected key-value extraction structure for this project format:\n";
+    fewShotExamples.slice(0, 5).forEach((ex, i) => {
+      promptText += `Example ${i + 1}:\n${JSON.stringify(ex, null, 2)}\n`;
+    });
+    promptText += "\nPlease align your key names and formatting with these verified examples where applicable.";
+  }
+
   const payload = {
     "model": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
     "max_tokens": 65536,
@@ -39,7 +52,7 @@ export async function extractReceiptData(base64Image: string): Promise<Record<st
         "content": [
           {
             "type": "text",
-            "text": "Extract all transaction details from this ATM receipt into a clean JSON object. Dynamically name the keys based on the context (e.g., ATM_LOCATION, WITHDRAWAL_AMOUNT, RECORD_NUMBER, AVAILABLE_BALANCE). Return ONLY the raw JSON object, without any markdown formatting, backticks, or conversational text."
+            "text": promptText
           },
           {
             "type": "image_url",
@@ -64,6 +77,66 @@ export async function extractReceiptData(base64Image: string): Promise<Record<st
     console.error("VLM Extraction Error:", error);
     return generateFallbackVlmExtraction();
   }
+}
+
+/**
+ * Extract text/number from a user-dragged crop region of an image
+ */
+export async function extractCroppedRegion(croppedBase64: string): Promise<string> {
+  const invokeUrl = "https://integrate.api.nvidia.com/v1/chat/completions";
+  const headers = {
+    "Authorization": "Bearer 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",
+    "Accept": "application/json",
+    "Content-Type": "application/json"
+  };
+
+  let formattedImageUrl = croppedBase64;
+  if (!croppedBase64.startsWith('data:')) {
+    formattedImageUrl = `data:image/png;base64,${croppedBase64}`;
+  }
+
+  const payload = {
+    "model": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+    "max_tokens": 2048,
+    "reasoning_budget": 512,
+    "stream": false,
+    "temperature": 0.2,
+    "top_p": 0.95,
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "Read and extract the text or number visible in this specific image crop. Return ONLY the raw string value, nothing else."
+          },
+          {
+            "type": "image_url",
+            "image_url": {
+              "url": formattedImageUrl
+            }
+          }
+        ]
+      }
+    ]
+  };
+
+  try {
+    const response = await axios.post(invokeUrl, payload, { headers, timeout: 25000 });
+    const content = response.data?.choices?.[0]?.message?.content || "";
+    let cleaned = content.trim();
+    if (cleaned.startsWith('```')) {
+      cleaned = cleaned.replace(/^```(?:json|text)?/i, '').replace(/```$/, '').trim();
+    }
+    return cleaned;
+  } catch (error) {
+    console.error("VLM Cropped Region Extraction Error:", error);
+    return "";
+  }
+}
+
+export async function extractReceiptData(base64Image: string): Promise<Record<string, any>> {
+  return extractFullReceipt(base64Image, []);
 }
 
 export interface VlmExtractionResponse {

@@ -50,11 +50,21 @@ CREATE TABLE IF NOT EXISTS dynamic_labels (
     CONSTRAINT unique_project_label UNIQUE (project_id, label_key)
 );
 
+-- 5. Few-Shot Library Table (Stores Human-Verified Outputs for Instant Few-Shot VLM Learning)
+CREATE TABLE IF NOT EXISTS few_shot_library (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+    document_type VARCHAR(100) DEFAULT 'ATM_RECEIPT',
+    verified_json_output JSONB NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Create Indexes for High Performance JSONB & FK Queries
 CREATE INDEX IF NOT EXISTS idx_images_project_id ON images(project_id);
 CREATE INDEX IF NOT EXISTS idx_vlm_results_image_id ON vlm_results(image_id);
 CREATE INDEX IF NOT EXISTS idx_vlm_results_jsonb ON vlm_results USING GIN (extracted_json);
 CREATE INDEX IF NOT EXISTS idx_dynamic_labels_project_key ON dynamic_labels(project_id, label_key);
+CREATE INDEX IF NOT EXISTS idx_few_shot_project_id ON few_shot_library(project_id);
 
 -- Sample Seed Data
 INSERT INTO projects (name, description, document_type, status)

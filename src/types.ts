@@ -54,7 +54,7 @@ export interface ExtractedField {
   box?: BoundingBox;
   ocrWordIds?: string[];
   status: FieldStatus;
-  category: 'header' | 'transaction' | 'financial' | 'cassette' | 'other';
+  category: 'header' | 'transaction' | 'financial' | 'cassette' | 'other' | 'vlm_discovered' | 'google_lens_crop';
 }
 
 export interface ReceiptImage {

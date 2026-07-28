@@ -103,6 +103,104 @@ export interface SupabaseDynamicLabelRow {
   created_at?: string;
 }
 
+export interface SupabaseFewShotRow {
+  id?: string;
+  project_id: string;
+  document_type?: string;
+  verified_json_output: Record<string, any>;
+  created_at?: string;
+}
+
+/** Fetch latest verified human extractions for Few-Shot VLM Learning */
+export async function fetchFewShotExamples(projectId: string, limit = 5): Promise<Record<string, any>[]> {
+  const sb = getSupabase();
+  if (!sb) return [];
+
+  try {
+    const { data, error } = await sb
+      .from('few_shot_library')
+      .select('verified_json_output')
+      .eq('project_id', projectId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      console.error('Error fetching few shot examples:', error);
+      return [];
+    }
+
+    return (data || []).map(row => row.verified_json_output).filter(Boolean);
+  } catch (err) {
+    console.error('Exception fetching few shot examples:', err);
+    return [];
+  }
+}
+
+/** 
+ * Save verified extraction into vlm_results, dynamic_labels, and few_shot_library.
+ * Throws an explicit Error if any Supabase operation fails.
+ */
+export async function saveVerifiedExtraction(
+  projectId: string, 
+  imageId: string, 
+  verifiedJson: Record<string, any>
+): Promise<boolean> {
+  const sb = getSupabase();
+  if (!sb) {
+    console.warn('[Supabase] Supabase is not configured or offline. Verified extraction saved locally.');
+    return true;
+  }
+
+  // 1. Insert into vlm_results
+  const { data: vlmData, error: vlmError } = await sb
+    .from('vlm_results')
+    .insert([{
+      image_id: imageId,
+      provider: 'NVIDIA_NEMOTRON',
+      extracted_json: verifiedJson,
+      raw_response_text: JSON.stringify(verifiedJson)
+    }]);
+
+  if (vlmError) {
+    console.error("Supabase Error [vlm_results]:", vlmError);
+    throw new Error(`[vlm_results] ${vlmError.message}`);
+  }
+
+  // 2. Extract keys and upsert into dynamic_labels
+  const keys = Object.keys(verifiedJson);
+  if (keys.length > 0) {
+    const labelsPayload = keys.map(key => ({
+      project_id: projectId,
+      label_key: key,
+      is_validated: true
+    }));
+
+    const { error: labelsError } = await sb
+      .from('dynamic_labels')
+      .upsert(labelsPayload, { onConflict: 'project_id, label_key' });
+      
+    if (labelsError) {
+       console.error("Supabase Error [dynamic_labels]:", labelsError);
+       throw new Error(`[dynamic_labels] ${labelsError.message}`);
+    }
+  }
+
+  // 3. Save to few_shot_library for Instant Learning
+  const { error: fewShotError } = await sb
+    .from('few_shot_library')
+    .insert([{
+      project_id: projectId,
+      verified_json_output: verifiedJson
+    }]);
+
+  if (fewShotError) {
+     console.error("Supabase Error [few_shot_library]:", fewShotError);
+     throw new Error(`[few_shot_library] ${fewShotError.message}`);
+  }
+
+  return true;
+}
+
 /** Save VLM Extraction result into Supabase vlm_results table */
 export async function saveVlmExtraction(
   imageId: string,
