@@ -31,7 +31,7 @@ export const UploadView: React.FC<UploadViewProps> = ({
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState<string>('');
-  const [selectedModel, setSelectedModel] = useState<string>('meta/llama-3.2-90b-vision-instruct');
+  const [selectedModel, setSelectedModel] = useState<string>('nvidia/nemotron-3-ultra-550b-a55b');
 
   const handleFileUpload = async (files: FileList | null) => {
     if (!files || files.length === 0 || !activeProject) return;
@@ -160,6 +160,9 @@ export const UploadView: React.FC<UploadViewProps> = ({
             onChange={(e) => setSelectedModel(e.target.value)}
             className="text-xs font-bold px-3 py-2 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
           >
+            <option value="nvidia/nemotron-3-ultra-550b-a55b">
+              Nemotron 3 Ultra 550B - Advanced Reasoning & Invoices
+            </option>
             <option value="meta/llama-3.2-90b-vision-instruct">
               Llama 3.2 90B Vision - High Accuracy
             </option>

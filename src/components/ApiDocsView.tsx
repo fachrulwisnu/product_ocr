@@ -22,9 +22,15 @@ export const ApiDocsView: React.FC<ApiDocsViewProps> = ({ isDarkMode }) => {
   const endpoints = [
     {
       method: 'POST',
+      path: '/api/extract',
+      description: 'Extract receipt/invoice data using Nemotron 3 Ultra 550B or Nemotron OCR v2 with Mobile Auto-Detection',
+      body: '{\n  "base64Image": "data:image/jpeg;base64,...",\n  "documentCategory": "AUTO",\n  "modelId": "nvidia/nemotron-3-ultra-550b-a55b"\n}'
+    },
+    {
+      method: 'POST',
       path: '/api/vlm',
-      description: 'NVIDIA Nemotron 30B VLM direct reasoning key-value extraction',
-      body: '{\n  "image": "data:image/png;base64,..."\n}'
+      description: 'NVIDIA Nemotron VLM direct reasoning key-value extraction',
+      body: '{\n  "image": "data:image/png;base64,...",\n  "documentType": "ATM Cash Withdrawal",\n  "modelId": "nvidia/nemotron-3-ultra-550b-a55b"\n}'
     },
     {
       method: 'POST',
@@ -103,14 +109,26 @@ export const ApiDocsView: React.FC<ApiDocsViewProps> = ({ isDarkMode }) => {
     <div className="space-y-6 max-w-6xl mx-auto">
       
       {/* Header */}
-      <div className="border-b border-slate-200 dark:border-slate-800 pb-4">
-        <h2 className="text-xl font-bold tracking-tight uppercase flex items-center gap-2">
-          <Code2 className="w-5 h-5 text-indigo-500" />
-          <span>REST API Documentation & Live Console</span>
-        </h2>
-        <p className="text-xs text-slate-500">
-          Programmatic API integration endpoints for uploading receipts, querying NVIDIA NIM OCR API, and triggering training.
-        </p>
+      <div className="border-b border-slate-200 dark:border-slate-800 pb-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-bold tracking-tight uppercase flex items-center gap-2">
+            <Code2 className="w-5 h-5 text-indigo-500" />
+            <span>REST API Documentation & Live Console</span>
+          </h2>
+          <p className="text-xs text-slate-500">
+            Programmatic API integration endpoints supporting Nemotron 3 Ultra 550B, mobile auto-detection, and Instant Learning.
+          </p>
+        </div>
+
+        <a
+          href="/docs"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-2 px-3.5 py-2 rounded bg-indigo-600 text-white hover:bg-indigo-700 text-xs font-bold uppercase tracking-wider transition-colors shadow-xs w-fit"
+        >
+          <Server className="w-4 h-4" />
+          <span>Open Scalar Interactive API Docs</span>
+        </a>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">

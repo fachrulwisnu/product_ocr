@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { createServer as createViteServer } from 'vite';
-import { invokeNvidiaVlm, convertVlmJsonToFields, HARDCODED_NVIDIA_API_KEY } from './src/lib/nvidiaVlm';
+import { invokeNvidiaVlm, convertVlmJsonToFields, HARDCODED_NVIDIA_API_KEY, extractReceiptData } from './src/lib/nvidiaVlm';
 import { predictFieldsFromOCR, runInstantLearningTraining } from './src/lib/extractionEngine';
 import { INITIAL_PROJECTS, INITIAL_RECEIPT_IMAGES, generateReceiptSVG } from './src/data/sampleReceipts';
 import { Project, ReceiptImage, ActivityLog, PlatformMetrics, TrainingJob } from './src/types';
@@ -60,6 +60,94 @@ function logActivity(projectId: string, action: ActivityLog['action'], details: 
 // ----------------------------------------------------
 // REST API ROUTES
 // ----------------------------------------------------
+
+// Scalar Interactive API Reference Documentation
+app.get('/docs', (req, res) => {
+  res.send(`
+    <!doctype html>
+    <html>
+      <head>
+        <title>ATM Receipt & Invoice AI API Documentation</title>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+      </head>
+      <body>
+        <script
+          id="api-reference"
+          data-url="/openapi.json"
+        ></script>
+        <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+      </body>
+    </html>
+  `);
+});
+
+// OpenAPI 3.0 Specification Endpoint
+app.get('/openapi.json', (req, res) => {
+  res.json({
+    openapi: '3.0.0',
+    info: {
+      title: 'AI Document & Receipt Extraction API',
+      version: '1.0.0',
+      description: 'REST API for multi-model AI extraction (Nemotron 3 Ultra, OCR v2, Llama Vision) with Instant Learning.'
+    },
+    paths: {
+      '/api/extract': {
+        post: {
+          summary: 'Extract Receipt or Invoice Data',
+          description: 'Supports mobile app auto-detection (leave documentCategory empty or set to AUTO).',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    base64Image: { type: 'string', description: 'Base64 encoded string of the receipt or invoice image.' },
+                    documentCategory: { type: 'string', description: 'Optional. Bank category or "AUTO" for auto-detection.', example: 'AUTO' },
+                    modelId: { type: 'string', description: 'Model ID to use', example: 'nvidia/nemotron-3-ultra-550b-a55b' }
+                  },
+                  required: ['base64Image']
+                }
+              }
+            }
+          },
+          responses: {
+            '200': {
+              description: 'Successful JSON extraction',
+              content: {
+                'application/json': {
+                  schema: { type: 'object' }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+});
+
+// Direct Extraction Endpoint for Mobile & Web External Integrations
+app.post('/api/extract', async (req, res) => {
+  try {
+    const { base64Image, imageData, documentCategory, modelId } = req.body;
+    const imgData = base64Image || imageData;
+    if (!imgData) {
+      return res.status(400).json({ error: 'base64Image or imageData is required' });
+    }
+
+    const chosenModel = modelId || 'nvidia/nemotron-3-ultra-550b-a55b';
+    const result = await extractReceiptData(imgData, documentCategory, chosenModel);
+    res.json({
+      success: true,
+      data: result
+    });
+  } catch (err: any) {
+    console.error('Error in /api/extract:', err);
+    res.status(500).json({ success: false, error: err.message || 'Extraction failed' });
+  }
+});
 
 // 1. Health & Config Check
 app.get('/api/health', (req, res) => {
