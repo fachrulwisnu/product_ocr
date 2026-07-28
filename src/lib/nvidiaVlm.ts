@@ -79,9 +79,9 @@ export async function extractReceiptData(
   const modelIdLower = modelId.toLowerCase();
 
   // ====================================================================================
-  // ROUTE A: COMPUTER VISION ENDPOINT (NVIDIA NEMOTRON OCR v2)
+  // ROUTE A: COMPUTER VISION ENDPOINT (NVIDIA NEMOTRON OCR v2) + HYBRID FORMATTER
   // ====================================================================================
-  if (modelIdLower.includes('ocr') || modelIdLower.includes('nemotron-ocr-v2') || modelIdLower.includes('nemotron-nano-ocr-v2')) {
+  if (modelId.includes('nemotron-ocr-v2') || modelId.includes('nemotron-nano-ocr-v2') || modelIdLower.includes('ocr')) {
     const ocrUrl = "https://ai.api.nvidia.com/v1/cv/nvidia/nemotron-ocr-v2";
     const ocrHeaders = {
       "Authorization": "Bearer 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",
@@ -92,8 +92,72 @@ export async function extractReceiptData(
     const payload = { input: [ { type: "image_url", url: fullDataUrl } ] };
 
     try {
+      // 1. Call Nemotron OCR for raw text detection
       const response = await axios.post(ocrUrl, payload, { headers: ocrHeaders, timeout: 90000 });
-      return response.data; // Returns raw text_detections and bounding boxes
+      const rawData = response.data;
+      
+      // 2. Parse the deeply nested NVIDIA response into an array of clean text lines
+      const extractedTextLines: string[] = [];
+      const cleanedData: Record<string, string> = {}; // Fallback object
+
+      if (rawData?.data && Array.isArray(rawData.data)) {
+        rawData.data.forEach((page: any) => {
+          if (page?.text_detections && Array.isArray(page.text_detections)) {
+            page.text_detections.forEach((detection: any, index: number) => {
+              const textValue = detection?.text_prediction?.text;
+              if (textValue) {
+                cleanedData[`LINE_${index + 1}`] = textValue.trim();
+                extractedTextLines.push(textValue.trim());
+              }
+            });
+          }
+        });
+      }
+
+      if (extractedTextLines.length === 0 && rawData?.text_detections && Array.isArray(rawData.text_detections)) {
+        rawData.text_detections.forEach((detection: any, index: number) => {
+          const textValue = detection?.text || detection?.label || detection?.text_prediction?.text;
+          if (textValue) {
+            cleanedData[`LINE_${index + 1}`] = textValue.trim();
+            extractedTextLines.push(textValue.trim());
+          }
+        });
+      }
+
+      // 3. Hybrid Formatting: Send the clean lines to Llama 3.1 70B for JSON structuring
+      if (schemaRule && extractedTextLines.length > 0) {
+        const chatUrl = "https://integrate.api.nvidia.com/v1/chat/completions";
+        const chatHeaders = {
+          "Authorization": "Bearer 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",
+          "Accept": "application/json",
+          "Content-Type": "application/json"
+        };
+
+        const formattingPrompt = `You are an expert OCR data formatter. Format the following raw OCR text lines into a clean JSON object. STRICT SCHEMA RULE: ${schemaRule}. Return ONLY raw JSON without markdown formatting.`;
+
+        const formatPayload = {
+          model: "meta/llama-3.1-70b-instruct",
+          messages: [
+            { role: "system", content: formattingPrompt },
+            { role: "user", content: extractedTextLines.join('\n') }
+          ],
+          temperature: 0.1,
+          max_tokens: 2048
+        };
+
+        try {
+          const formatResponse = await axios.post(chatUrl, formatPayload, { headers: chatHeaders, timeout: 30000 });
+          const structuredText = formatResponse.data.choices[0].message.content;
+          return JSON.parse(structuredText.replace(/```json/g, '').replace(/```/g, '').trim());
+        } catch (formatErr) {
+          console.warn("Llama 3.1 70B formatting fallback:", formatErr);
+          return cleanedData;
+        }
+      }
+
+      // 4. Fallback if formatting fails or schema is missing: return clean lines
+      return cleanedData; 
+
     } catch (error: any) {
       console.error("Nemotron OCR v2 Error:", error.response?.data || error.message);
       throw new Error(`OCR Engine Error: ${error.response?.data?.detail || error.message}`);
