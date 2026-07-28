@@ -15,6 +15,7 @@ import projectsV1Router from './src/routes/v1/projects.route';
 import imagesV1Router from './src/routes/v1/images.route';
 import ocrV1Router from './src/routes/v1/ocr.route';
 import templatesV1Router from './src/routes/v1/templates.route';
+import annotationsV1Router from './src/routes/v1/annotations.route';
 
 const app = express();
 const PORT = 3000;
@@ -33,6 +34,7 @@ app.use('/api/v1/projects', projectsV1Router);
 app.use('/api/v1/images', imagesV1Router);
 app.use('/api/v1/ocr', ocrV1Router);
 app.use('/api/v1/templates', templatesV1Router);
+app.use('/api/v1/annotations', annotationsV1Router);
 
 // In-Memory Data Store (Initialized with pre-loaded ATM receipts)
 let projectsStore: Project[] = [...INITIAL_PROJECTS];

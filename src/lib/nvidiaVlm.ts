@@ -4,7 +4,6 @@
  */
 
 import axios from 'axios';
-import OpenAI from 'openai';
 import { GOLDEN_TEMPLATES } from './goldenTemplates';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { DEFAULT_RECEIPT_TEMPLATES } from './defaultTemplates';
@@ -205,37 +204,43 @@ export async function extractReceiptData(
   }
 
   // ====================================================================================
-  // ROUTE B: ADVANCED REASONING MODEL (NEMOTRON 3 ULTRA 550B via OPENAI SDK)
+  // ROUTE B: ADVANCED REASONING MODEL (NEMOTRON 3 ULTRA 550B via AXIOS)
   // ====================================================================================
   else if (modelId === 'nvidia/nemotron-3-ultra-550b-a55b') {
-    const client = new OpenAI({
-      apiKey: "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",
-      baseURL: "https://integrate.api.nvidia.com/v1",
-      dangerouslyAllowBrowser: true 
-    });
+    const chatUrl = "https://integrate.api.nvidia.com/v1/chat/completions";
+    const chatHeaders = {
+      "Authorization": "Bearer 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",
+      "Accept": "application/json",
+      "Content-Type": "application/json"
+    };
+
+    // Constructing the payload manually without the OpenAI SDK's extra_body wrapper
+    const payload = {
+      model: "nvidia/nemotron-3-ultra-550b-a55b",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: systemPrompt },
+            { type: "image_url", image_url: { url: fullDataUrl } }
+          ]
+        }
+      ],
+      temperature: 1,
+      top_p: 0.95,
+      max_tokens: 4096,
+      // NVIDIA specific parameters attached directly to the root payload
+      chat_template_kwargs: { enable_thinking: true },
+      reasoning_budget: 4096
+    };
 
     try {
-      const completion: any = await client.chat.completions.create({
-        model: "nvidia/nemotron-3-ultra-550b-a55b",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: "Extract structured data from this document/invoice." }
-        ],
-        temperature: 1,
-        top_p: 0.95,
-        max_tokens: 16384,
-        // @ts-ignore
-        extra_body: {
-          chat_template_kwargs: { enable_thinking: true },
-          reasoning_budget: 16384
-        }
-      });
-
-      const extractedText = completion.choices[0]?.message?.content || "{}";
+      const response = await axios.post(chatUrl, payload, { headers: chatHeaders, timeout: 90000 });
+      const extractedText = response.data.choices[0]?.message?.content || "{}";
       return JSON.parse(extractedText.replace(/```json/g, '').replace(/```/g, '').trim());
     } catch (error: any) {
-      console.error("Nemotron 3 Ultra Reasoning Error:", error);
-      throw error;
+      console.error("Nemotron 3 Ultra Reasoning Error:", error.response?.data || error.message);
+      throw new Error(`Ultra Engine Error: ${JSON.stringify(error.response?.data) || error.message}`);
     }
   }
 
@@ -261,18 +266,19 @@ export async function extractReceiptData(
           ]
         }
       ],
-      max_tokens: 4096,
+      // Reduced max_tokens slightly to prevent validation rejection from stricter models
+      max_tokens: 2048, 
       temperature: 0.1,
       top_p: 1
     };
 
     try {
       const response = await axios.post(chatUrl, payload, { headers: chatHeaders, timeout: 90000 });
-      const extractedText = response.data.choices[0].message.content;
+      const extractedText = response.data.choices[0]?.message?.content || "{}";
       return JSON.parse(extractedText.replace(/```json/g, '').replace(/```/g, '').trim());
     } catch (error: any) {
       console.error(`Chat Completions API Error (${modelId}):`, error.response?.data || error.message);
-      throw new Error(`Vision LLM Error: ${error.response?.data?.detail || error.message}`);
+      throw new Error(`Vision LLM Error: ${JSON.stringify(error.response?.data) || error.message}`);
     }
   }
 }

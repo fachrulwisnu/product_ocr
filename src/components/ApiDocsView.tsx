@@ -22,6 +22,17 @@ export const ApiDocsView: React.FC<ApiDocsViewProps> = ({ isDarkMode }) => {
   const endpoints = [
     {
       method: 'POST',
+      path: '/api/v1/annotations/img-sample-1',
+      description: 'Submit human-verified HITL corrections and approve/reject document extraction into annotations_ocr table',
+      body: '{\n  "final_json_data": {\n    "BANK_NAME": "CIMB Niaga",\n    "ATM_ID": "ATM-9081",\n    "AMOUNT": "$500.00"\n  },\n  "status": "APPROVED",\n  "review_time_ms": 7500\n}'
+    },
+    {
+      method: 'GET',
+      path: '/api/v1/annotations',
+      description: 'Get list of all human-verified annotations'
+    },
+    {
+      method: 'POST',
       path: '/api/extract',
       description: 'Extract receipt/invoice data using Nemotron 3 Ultra 550B or Nemotron OCR v2 with Mobile Auto-Detection',
       body: '{\n  "base64Image": "data:image/jpeg;base64,...",\n  "documentCategory": "AUTO",\n  "modelId": "nvidia/nemotron-3-ultra-550b-a55b"\n}'
