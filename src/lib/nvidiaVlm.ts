@@ -7,7 +7,7 @@ import axios from 'axios';
 import OpenAI from 'openai';
 import { GOLDEN_TEMPLATES } from './goldenTemplates';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
-import { getActiveTemplatesStore } from '../routes/v1/templates.route';
+import { DEFAULT_RECEIPT_TEMPLATES } from './defaultTemplates';
 
 // Hardcoded NVIDIA API Key
 export const HARDCODED_NVIDIA_API_KEY = "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";
@@ -141,7 +141,7 @@ export async function extractReceiptData(
       }
 
       if (dbTemplates.length === 0) {
-        dbTemplates = getActiveTemplatesStore();
+        dbTemplates = DEFAULT_RECEIPT_TEMPLATES;
       }
 
       let activeSchemaRule = schemaRule || "Format as a general receipt JSON.";

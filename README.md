@@ -1,12 +1,33 @@
-# Nanonets ATM Receipt VLM Extractor Platform
+# Nanonets Enterprise ATM Receipt Document AI Platform
 
-Vision-Language Model (VLM) Unsupervised Dynamic Key-Value Extractor for ATM Receipts powered by **NVIDIA Nemotron 30B VLM (`nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`)** and Supabase.
+Enterprise Vision-Language Model (VLM) & Computer Vision (CV) Document AI Platform powered by **NVIDIA AI Models** (Nemotron OCR v2, Llama 3.1 70B, Llama 3.2 90B Vision, Nemotron 3 Ultra 550B), Express.js backend, and Supabase database.
 
 ---
 
-## 🚀 How to Run locally
+## 🌟 Key Platform Capabilities
 
-Built on **Full-Stack Express.js + Vite (React + TypeScript)**.
+### 1. Enterprise Multi-Model VLM Router & Hybrid Formatter
+- **Route A (Computer Vision OCR + Hybrid LLM):** Uses `nvidia/nemotron-ocr-v2` (`https://ai.api.nvidia.com/v1/cv/nvidia/nemotron-ocr-v2`) for raw text detection and bounding box coordinate extraction. Next, clean text lines are intercepted and formatted into structured JSON using `meta/llama-3.1-70b-instruct`.
+- **Route B (Advanced Reasoning Model):** Direct connection to `nvidia/nemotron-3-ultra-550b-a55b` via OpenAI SDK with `enable_thinking` enabled and a 16k reasoning token budget.
+- **Route C (Standard Vision LLMs):** Direct multimodal extraction using `meta/llama-3.2-90b-vision-instruct` or `nvidia/nemotron-nano-vl`.
+
+### 2. OCR Auto-Classification & Dynamic Template Engine
+- **Keywords Vector Matching:** Automatically scans raw text detections from Nemotron OCR against registered template keywords (e.g., `["CIMB", "CASSETTE"]` or `["BCA", "TARIK"]`).
+- **Dynamic Schema Rules:** Automatically applies schema instructions registered in `receipt_templates_ocr` for the detected bank or receipt type.
+- **Template Manager UI:** Comprehensive dashboard view allowing operators to manage Bank Categories and Receipt Schema Rules with live keyword trigger configurations.
+
+### 3. Interactive Bounding Box & Crop Region Studio
+- **Overlay Visualizer:** Interactive SVG overlay rendering normalized bounding box coordinates directly on uploaded ATM receipts.
+- **Cropped Region Extraction:** Select any custom bounding box on a document image to trigger instant isolated region reading powered by `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`.
+
+### 4. Few-Shot Instant Learning Dataset Manager
+- **Verified Examples Library:** Store corrected extraction outputs into `few_shot_library` and dynamically inject verified ground-truth samples into prompt contexts to improve extraction accuracy over time.
+
+---
+
+## 🚀 How to Run Locally
+
+Built on **Full-Stack Express.js + Vite (React + TypeScript)** running on a single port (`3000`).
 
 ```bash
 # 1. Install dependencies
@@ -16,23 +37,14 @@ npm install
 npm run dev
 ```
 
-App and REST API will be active at:
+App Dashboard and API Services will be accessible at:
 👉 **http://localhost:3000**
 
 ---
 
-## 🤖 VLM API Integration (NVIDIA Nemotron 30B)
+## 🗄️ Supabase PostgreSQL Database Schema
 
-The application communicates directly with NVIDIA's Vision-Language Model endpoint:
-- **Endpoint:** `https://integrate.api.nvidia.com/v1/chat/completions`
-- **Model:** `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`
-- **Authorization Header:** `Bearer <NVIDIA_API_KEY>`
-
----
-
-## 🗄️ Supabase PostgreSQL Schema
-
-Execute this SQL DDL script in your Supabase SQL Editor:
+Execute this SQL script in your Supabase SQL Editor to provision all tables:
 
 ```sql
 -- 1. Projects Table
@@ -61,7 +73,7 @@ CREATE TABLE IF NOT EXISTS images (
     uploaded_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 3. VLM Results Table (Stores NVIDIA Nemotron 30B Unsupervised Extractions)
+-- 3. VLM Results Table
 CREATE TABLE IF NOT EXISTS vlm_results (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     image_id UUID REFERENCES images(id) ON DELETE CASCADE,
@@ -82,18 +94,46 @@ CREATE TABLE IF NOT EXISTS dynamic_labels (
     CONSTRAINT unique_project_label UNIQUE (project_id, label_key)
 );
 
--- Indexes
-CREATE INDEX IF NOT EXISTS idx_images_project_id ON images(project_id);
-CREATE INDEX IF NOT EXISTS idx_vlm_results_image_id ON vlm_results(image_id);
-CREATE INDEX IF NOT EXISTS idx_vlm_results_jsonb ON vlm_results USING GIN (extracted_json);
-CREATE INDEX IF NOT EXISTS idx_dynamic_labels_project_key ON dynamic_labels(project_id, label_key);
+-- 5. Few Shot Learning Library Table
+CREATE TABLE IF NOT EXISTS few_shot_library (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    document_type VARCHAR(100) DEFAULT 'ATM Cash Withdrawal',
+    verified_json_output JSONB NOT NULL,
+    notes TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 6. Document Categories (Phase 4)
+CREATE TABLE IF NOT EXISTS document_categories_ocr (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) NOT NULL UNIQUE,
+    description TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 7. Receipt Templates (Phase 4)
+CREATE TABLE IF NOT EXISTS receipt_templates_ocr (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    category_id UUID REFERENCES document_categories_ocr(id) ON DELETE CASCADE,
+    template_name VARCHAR(255) NOT NULL,
+    schema_rule TEXT NOT NULL,
+    keywords TEXT[] NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Disable Row Level Security for rapid development
+ALTER TABLE document_categories_ocr DISABLE ROW LEVEL SECURITY;
+ALTER TABLE receipt_templates_ocr DISABLE ROW LEVEL SECURITY;
 ```
 
 ---
 
-## 🛠️ Key Capabilities
+## 📡 REST API & Scalar Open API Endpoints
 
-1. **Unsupervised VLM Extraction:** Extracts dynamic key-value pairs (`ATM_LOCATION`, `WITHDRAWAL_AMOUNT`, `CASSETTE_DISPENSED`, etc.) in one shot without requiring predefined bounding box coordinates.
-2. **Dynamic Field Studio:** Interactive workspace allowing operators to edit both key names and values before saving.
-3. **Supabase Auto-Sync:** Saves JSON extractions into `vlm_results` (`JSONB`) and registers discovered key names into `dynamic_labels`.
-4. **REST API Endpoints:** `/api/vlm`, `/api/upload`, `/api/projects`, `/api/images`, `/api/metrics`.
+- **`POST /api/v1/ocr/process`**: Execute Nemotron OCR v2 + Hybrid Llama 70B extraction on base64 images.
+- **`GET /api/v1/templates/categories`**: List all bank / issuer categories.
+- **`POST /api/v1/templates/categories`**: Create a new bank category.
+- **`GET /api/v1/templates/receipt-templates`**: List all receipt templates and keywords rules.
+- **`POST /api/v1/templates/receipt-templates`**: Register a new template schema rule.
+- **`GET /api/v1/projects`**: Manage workspace projects.
+- **`GET /api/docs`**: View interactive API documentation (Scalar UI).
