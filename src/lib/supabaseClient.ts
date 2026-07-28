@@ -165,14 +165,26 @@ export async function fetchFewShotExamples(projectId: string, limit = 5): Promis
 }
 
 /** 
- * Save verified extraction into vlm_results, dynamic_labels, and few_shot_library.
+ * Save verified extraction into projects, images, vlm_results, dynamic_labels, and few_shot_library.
+ * Hierarchical order prevents foreign key constraint violations.
  * Throws an explicit Error if any Supabase operation fails.
  */
 export async function saveVerifiedExtraction(
   projectId: string, 
   imageId: string, 
-  verifiedJson: Record<string, any>
+  fileNameOrJson: string | Record<string, any>,
+  verifiedJsonParam?: Record<string, any>
 ): Promise<boolean> {
+  let fileName = 'document.png';
+  let verifiedJson: Record<string, any> = {};
+
+  if (typeof fileNameOrJson === 'string') {
+    fileName = fileNameOrJson;
+    verifiedJson = verifiedJsonParam || {};
+  } else {
+    verifiedJson = fileNameOrJson || {};
+  }
+
   if (!projectId || !imageId) {
     throw new Error(`Invalid arguments: project_id (${projectId}) and image_id (${imageId}) must not be null or undefined.`);
   }
@@ -186,7 +198,34 @@ export async function saveVerifiedExtraction(
     throw new Error("Supabase client is not initialized. Please verify VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY variables.");
   }
 
-  // 1. Insert into vlm_results
+  // 1. Ensure Project exists (Upsert project row)
+  const { error: projectError } = await sb
+    .from('projects')
+    .upsert([{ id: targetProjectId, name: 'Default Project', status: 'ACTIVE' }])
+    .select();
+
+  if (projectError) {
+    console.error("Supabase Error [projects]:", projectError);
+    throw new Error(`Project Insert Error: ${projectError.message}`);
+  }
+
+  // 2. Ensure Image exists (Upsert image row)
+  const { error: imageError } = await sb
+    .from('images')
+    .upsert([{ 
+      id: targetImageId, 
+      project_id: targetProjectId, 
+      filename: fileName || 'document.png', 
+      upload_status: 'PROCESSED' 
+    }])
+    .select();
+
+  if (imageError) {
+    console.error("Supabase Error [images]:", imageError);
+    throw new Error(`Image Insert Error: ${imageError.message}`);
+  }
+
+  // 3. NOW insert into vlm_results
   const { error: vlmError } = await sb
     .from('vlm_results')
     .insert([{
@@ -198,10 +237,10 @@ export async function saveVerifiedExtraction(
 
   if (vlmError) {
     console.error("Supabase Error [vlm_results]:", vlmError);
-    throw new Error(`[vlm_results] ${vlmError.message || JSON.stringify(vlmError)}`);
+    throw new Error(`VLM Result Error: ${vlmError.message}`);
   }
 
-  // 2. Extract keys and upsert into dynamic_labels
+  // 4. Extract keys and upsert into dynamic_labels
   const keys = Object.keys(verifiedJson);
   if (keys.length > 0) {
     const labelsPayload = keys.map(key => ({
@@ -216,11 +255,11 @@ export async function saveVerifiedExtraction(
       
     if (labelsError) {
        console.error("Supabase Error [dynamic_labels]:", labelsError);
-       throw new Error(`[dynamic_labels] ${labelsError.message || JSON.stringify(labelsError)}`);
+       throw new Error(`Labels Error: ${labelsError.message}`);
     }
   }
 
-  // 3. Save to few_shot_library for Instant Learning
+  // 5. Save to few_shot_library for Instant Learning
   const { error: fewShotError } = await sb
     .from('few_shot_library')
     .insert([{
@@ -230,7 +269,7 @@ export async function saveVerifiedExtraction(
 
   if (fewShotError) {
      console.error("Supabase Error [few_shot_library]:", fewShotError);
-     throw new Error(`[few_shot_library] ${fewShotError.message || JSON.stringify(fewShotError)}`);
+     throw new Error(`Few-Shot Error: ${fewShotError.message}`);
   }
 
   return true;

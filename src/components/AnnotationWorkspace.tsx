@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ReceiptImage, ExtractedField } from '../types';
 import { 
   ZoomIn, 
@@ -194,6 +194,42 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
     };
   }, [currentImage?.id, currentImage?.fileUrl]);
 
+  // TASK 3: MATCH VLM VALUES TO TESSERACT BOXES
+  const matchedBoxes = useMemo(() => {
+    if (!visualBoxes || visualBoxes.length === 0) return [];
+
+    return visualBoxes.map((box) => {
+      const cleanBoxText = box.text.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (!cleanBoxText) {
+        return { ...box, isVlmMatch: false };
+      }
+
+      // Check against current fieldsState
+      for (const field of fieldsState) {
+        const valStr = (field.value || '').toString();
+        const keyStr = field.key || field.label || '';
+
+        const cleanVal = valStr.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const cleanKey = keyStr.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+        const matchesValue = cleanVal.length >= 2 && (cleanVal.includes(cleanBoxText) || cleanBoxText.includes(cleanVal));
+        const matchesKey = cleanKey.length >= 2 && (cleanKey.includes(cleanBoxText) || cleanBoxText.includes(cleanKey));
+
+        if (matchesValue || matchesKey) {
+          return {
+            ...box,
+            isVlmMatch: true,
+            matchedKey: keyStr.toUpperCase().replace(/\s+/g, '_'),
+            matchedLabel: field.label || keyStr,
+            matchedValue: valStr
+          };
+        }
+      }
+
+      return { ...box, isVlmMatch: false };
+    });
+  }, [visualBoxes, fieldsState]);
+
   // Sync state & fetch Few-Shot Examples when selected image changes
   useEffect(() => {
     if (selectedImage) {
@@ -384,6 +420,7 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
       await saveVerifiedExtraction(
         currentImage.projectId,
         currentImage.id,
+        currentImage.fileName || 'document.png',
         jsonExtraction
       );
 
@@ -590,8 +627,8 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
                 draggable={false}
               />
 
-              {/* Client-Side Visual Bounding Boxes (Tesseract.js Dual-Engine) */}
-              {visualBoxes.map((box) => {
+              {/* Client-Side Visual Bounding Boxes (Tesseract.js & VLM Field Matches) */}
+              {imageNaturalWidth > 0 && imageNaturalHeight > 0 && matchedBoxes.map((box) => {
                 const leftPct = (box.x0 / imageNaturalWidth) * 100;
                 const topPct = (box.y0 / imageNaturalHeight) * 100;
                 const widthPct = Math.max(0.5, ((box.x1 - box.x0) / imageNaturalWidth) * 100);
@@ -601,37 +638,46 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
                 const cleanHoverVal = (hoveredFieldValue || '').toLowerCase().replace(/[^a-z0-9]/g, '');
                 const cleanHoverKey = (hoveredFieldKey || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
-                const isMatched = (
+                const isHovered = (
                   cleanBoxText.length > 0 && (
                     (cleanHoverVal.length > 0 && (cleanHoverVal.includes(cleanBoxText) || cleanBoxText.includes(cleanHoverVal))) ||
                     (cleanHoverKey.length > 0 && (cleanHoverKey.includes(cleanBoxText) || cleanBoxText.includes(cleanHoverKey)))
                   )
                 );
 
+                const isMatched = box.isVlmMatch;
+
                 return (
                   <div
                     key={box.id}
-                    className={`absolute transition-all duration-150 pointer-events-auto rounded-none ${
-                      isMatched
-                        ? 'border-2 border-emerald-400 bg-emerald-400/30 shadow-lg shadow-emerald-500/50 z-30 ring-2 ring-emerald-400/60 scale-105 animate-pulse'
-                        : 'border-2 border-blue-600 bg-blue-600/15 hover:border-blue-400 hover:bg-blue-500/25 z-10'
-                    }`}
                     style={{
+                      position: 'absolute',
                       left: `${leftPct}%`,
                       top: `${topPct}%`,
                       width: `${widthPct}%`,
-                      height: `${heightPct}%`
+                      height: `${heightPct}%`,
+                      zIndex: isHovered ? 30 : (isMatched ? 20 : 10),
                     }}
-                    title={`Text: ${box.text} (Confidence: ${(box.confidence * 100).toFixed(0)}%)`}
+                    className={`transition-all duration-150 pointer-events-auto rounded-none ${
+                      isHovered
+                        ? 'border-2 border-emerald-400 bg-emerald-400/35 shadow-lg shadow-emerald-500/50 ring-2 ring-emerald-400/60 scale-105 animate-pulse'
+                        : isMatched
+                          ? 'border-2 border-blue-600 bg-blue-600/25 hover:border-blue-400 hover:bg-blue-500/35'
+                          : 'border-2 border-blue-600 bg-blue-600/15 hover:border-blue-400 hover:bg-blue-500/25'
+                    }`}
+                    title={`${box.matchedKey ? `[${box.matchedKey}] ` : ''}${box.text} (Confidence: ${(box.confidence * 100).toFixed(0)}%)`}
                   >
                     <span
-                      className={`absolute -top-4 left-0 text-[8px] font-mono px-1 py-0.2 rounded-none whitespace-nowrap shadow-xs pointer-events-none ${
-                        isMatched
+                      style={{ top: '-1.25rem' }}
+                      className={`absolute left-0 text-[8px] font-mono px-1 py-0.5 rounded-none whitespace-nowrap shadow-xs pointer-events-none ${
+                        isHovered
                           ? 'bg-emerald-500 text-white font-extrabold z-40'
-                          : 'bg-blue-600 text-white font-bold'
+                          : isMatched
+                            ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 border border-slate-700 font-extrabold z-30'
+                            : 'bg-blue-600 text-white font-bold'
                       }`}
                     >
-                      {box.text}
+                      {box.matchedKey ? `${box.matchedKey}: ` : ''}{box.text}
                     </span>
                   </div>
                 );
