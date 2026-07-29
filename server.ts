@@ -187,9 +187,19 @@ app.post('/api/extract', async (req, res) => {
     }
 
     const chosenModel = modelId || 'nvidia/nemotron-3-ultra-550b-a55b';
-    const result = await extractReceiptData(imgData, documentCategory, chosenModel);
+    const result = await extractReceiptData(imgData, documentCategory || 'ATM_BILL_COUNTER', chosenModel);
     res.json({
       success: true,
+      documentType: result.documentType || documentCategory || 'ATM_BILL_COUNTER',
+      bankCode: result.bankCode || 'UNKNOWN',
+      cassette1: result.cassette1 ?? null,
+      cassette2: result.cassette2 ?? null,
+      cassette3: result.cassette3 ?? null,
+      cassette4: result.cassette4 ?? null,
+      cassette5: result.cassette5 ?? null,
+      requiresReview: result.requiresReview ?? true,
+      ...result,
+      _raw_text: result._raw_text || '',
       data: result
     });
   } catch (err: any) {
@@ -345,7 +355,20 @@ app.post('/api/upload', async (req, res) => {
     logActivity(projectId, 'upload', `Uploaded image ${newImg.fileName}`);
     logActivity(projectId, 'ocr_processed', `NVIDIA VLM (${chosenModel}) extraction completed for ${newImg.fileName}`);
 
+    const aiExtractedData = vlmResponse?.extractedJson || {};
+
     res.status(201).json({
+      success: true,
+      documentType: aiExtractedData.documentType || docCategory || 'ATM_BILL_COUNTER',
+      bankCode: aiExtractedData.bankCode || 'UNKNOWN',
+      cassette1: aiExtractedData.cassette1 ?? null,
+      cassette2: aiExtractedData.cassette2 ?? null,
+      cassette3: aiExtractedData.cassette3 ?? null,
+      cassette4: aiExtractedData.cassette4 ?? null,
+      cassette5: aiExtractedData.cassette5 ?? null,
+      requiresReview: aiExtractedData.requiresReview ?? true,
+      ...aiExtractedData,
+      _raw_text: aiExtractedData._raw_text || vlmResponse.rawText || '',
       ...newImg,
       vlmResult: vlmResponse
     });

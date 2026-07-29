@@ -93,7 +93,7 @@ export async function extractReceiptData(
   const fullDataUrl = `data:image/jpeg;base64,${base64DataOnly}`;
   
   const resolvedCategory = !documentCategory || documentCategory === 'AUTO' || documentCategory === '' ? 'AUTO_DETECT' : documentCategory;
-  let schemaRule = GOLDEN_TEMPLATES[resolvedCategory] || "Format as a clean JSON object.";
+  let schemaRule = GOLDEN_TEMPLATES[resolvedCategory] || getGoldenTemplatesPrompt(resolvedCategory) || "Format as a clean JSON object.";
   const systemPrompt = `You are an expert document data extraction engine. STRICT SCHEMA RULE: ${schemaRule}. Return ONLY raw JSON without markdown formatting.`;
 
   // ====================================================================================
@@ -125,11 +125,16 @@ export async function extractReceiptData(
     try {
       const response = await axios.post(chatUrl, payload, { headers: chatHeaders, timeout: 60000 });
       const structuredText = response.data.choices[0]?.message?.content || "{}";
-      return JSON.parse(structuredText.replace(/```json/g, '').replace(/```/g, '').trim());
+      const parsedData = JSON.parse(structuredText.replace(/```json/g, '').replace(/```/g, '').trim());
+      
+      // INJECT RAW TEXT FOR THE FRONTEND DASHBOARD
+      parsedData._raw_text = rawTextContext;
+      
+      return parsedData;
     } catch (error: any) {
       console.error("Hybrid Formatter Error:", error.response?.data || error.message);
       // Fallback: return as JSON if LLM formatting fails, so frontend doesn't use mock data
-      return { raw_text_fallback: rawTextContext }; 
+      return { raw_text_fallback: rawTextContext, _raw_text: rawTextContext }; 
     }
   }
 
@@ -163,7 +168,12 @@ export async function extractReceiptData(
     try {
       const response = await axios.post(chatUrl, payload, { headers: chatHeaders, timeout: 90000 });
       const extractedText = response.data.choices[0]?.message?.content || "{}";
-      return JSON.parse(extractedText.replace(/```json/g, '').replace(/```/g, '').trim());
+      const parsedData = JSON.parse(extractedText.replace(/```json/g, '').replace(/```/g, '').trim());
+      
+      // INJECT RAW TEXT FOR THE FRONTEND DASHBOARD
+      parsedData._raw_text = rawTextContext;
+
+      return parsedData;
     } catch (error: any) {
       throw new Error(`Reasoning Engine Error: ${JSON.stringify(error.response?.data) || error.message}`);
     }
@@ -200,7 +210,12 @@ export async function extractReceiptData(
     try {
       const response = await axios.post(chatUrl, payload, { headers: chatHeaders, timeout: 90000 });
       const extractedText = response.data.choices[0]?.message?.content || "{}";
-      return JSON.parse(extractedText.replace(/```json/g, '').replace(/```/g, '').trim());
+      const parsedData = JSON.parse(extractedText.replace(/```json/g, '').replace(/```/g, '').trim());
+
+      // INJECT A FALLBACK MESSAGE FOR VISION LLM
+      parsedData._raw_text = "NVIDIA Vision LLM Engine used. Raw line-by-line OCR is bypassed. Please see the Field Studio tab for extracted JSON data.";
+
+      return parsedData;
     } catch (error: any) {
       throw new Error(`Vision LLM Error: ${JSON.stringify(error.response?.data) || error.message}`);
     }
@@ -266,7 +281,12 @@ export async function extractReceiptData(
       });
       
       const extractedText = response.data.candidates[0]?.content?.parts[0]?.text || "{}";
-      return JSON.parse(extractedText);
+      const parsedData = JSON.parse(extractedText);
+
+      // INJECT A FALLBACK MESSAGE FOR GEMINI
+      parsedData._raw_text = "Gemini Native Vision Engine used. Raw line-by-line OCR is bypassed. Please see the Field Studio tab for the extracted JSON data.";
+
+      return parsedData;
     } catch (error: any) {
       console.error(`Gemini API Error (${cleanModelId}):`, error.response?.data || error.message);
       throw new Error(`Google Gemini Error: ${JSON.stringify(error.response?.data?.error?.message) || error.message}`);

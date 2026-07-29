@@ -862,6 +862,11 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
                 const w = block.box_width ?? 80;
                 const h = block.box_height ?? 5;
 
+                // Safeguard: Ensure box coordinate numbers exist
+                if (typeof block.box_x !== 'number' || typeof block.box_y !== 'number' || isNaN(x) || isNaN(y)) {
+                  return null;
+                }
+
                 return (
                   <div
                     key={`nvidia-ocr-box-${idx}`}
@@ -888,6 +893,11 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
 
               {/* Client-Side Visual Bounding Boxes (Tesseract.js & VLM Field Matches) */}
               {showBoundingBoxes && imageNaturalWidth > 0 && imageNaturalHeight > 0 && matchedBoxes.map((box) => {
+                // Safeguard: Skip invalid coordinate boxes
+                if (typeof box.x0 !== 'number' || typeof box.y0 !== 'number' || isNaN(box.x0) || isNaN(box.y0)) {
+                  return null;
+                }
+
                 const leftPct = (box.x0 / imageNaturalWidth) * 100;
                 const topPct = (box.y0 / imageNaturalHeight) * 100;
                 const widthPct = Math.max(0.5, ((box.x1 - box.x0) / imageNaturalWidth) * 100);
@@ -1122,59 +1132,82 @@ export const AnnotationWorkspace: React.FC<AnnotationWorkspaceProps> = ({
             </div>
           )}
 
-          {/* TAB 2: Extracted Text Panel (NVIDIA Nemotron OCR v2 Line-by-Line) */}
-          {activeRightTab === 'raw_ocr' && (
-            <div className="flex-1 overflow-y-auto p-4 space-y-3 font-mono text-xs">
-              <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
-                <span className="text-[10px] font-bold uppercase text-emerald-500 flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5" /> NVIDIA Nemotron OCR v2 Text Engine
-                </span>
-                <span className="text-[10px] text-slate-400">
-                  {nvidiaOcrBlocks.length} Bounding Boxes
-                </span>
-              </div>
+          {/* TAB 2: Extracted Text Panel (NVIDIA & Gemini Hybrid AI Output) */}
+          {activeRightTab === 'raw_ocr' && (() => {
+            const displayRawText = rawOcrText || currentImage?.ocrData?.rawText || (currentImage as any)?._raw_text || (currentImage as any)?.vlmResult?.rawText || '';
+            const hasDataToDisplay = nvidiaOcrBlocks.length > 0 || displayRawText || fieldsState.length > 0;
 
-              {nvidiaOcrBlocks.length === 0 ? (
-                <div className="text-center py-12 space-y-3">
-                  <p className="text-slate-400">No OCR extraction performed yet.</p>
-                  <button
-                    onClick={handleRunNvidiaOcrProcess}
-                    disabled={isProcessingNvidiaOcr}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-bold uppercase tracking-wider inline-flex items-center gap-2 cursor-pointer shadow-md"
-                  >
-                    {isProcessingNvidiaOcr ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                    Run OCR Extraction Now
-                  </button>
+            return (
+              <div className="flex-1 overflow-y-auto p-4 space-y-3 font-mono text-xs">
+                <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
+                  <span className="text-[10px] font-bold uppercase text-emerald-500 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5" /> Extracted Text / Hybrid AI Engine
+                  </span>
+                  <span className="text-[10px] text-slate-400">
+                    {nvidiaOcrBlocks.length > 0 ? `${nvidiaOcrBlocks.length} Bounding Boxes` : 'Structured JSON Mode'}
+                  </span>
                 </div>
-              ) : (
-                <div className="space-y-2">
-                  <div className="p-3 bg-slate-950 text-emerald-400 rounded-lg border border-slate-800 space-y-1.5">
-                    <div className="text-[10px] font-bold uppercase text-slate-500 tracking-wider mb-2">Line-by-Line Raw Extracted Output:</div>
-                    {nvidiaOcrBlocks.map((block: any, idx: number) => (
-                      <div key={`ocr-line-${idx}`} className="flex items-start justify-between gap-2 p-1.5 hover:bg-slate-900 rounded border border-transparent hover:border-emerald-500/30 transition-colors">
-                        <span className="text-slate-500 text-[10px] w-6 select-none">{idx + 1}.</span>
-                        <span className="flex-1 font-semibold text-slate-100">{block.text_content}</span>
-                        {block.confidence && (
-                          <span className="text-[9px] text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded font-bold">
-                            {Math.round(block.confidence * 100)}%
-                          </span>
-                        )}
-                      </div>
-                    ))}
+
+                {!hasDataToDisplay ? (
+                  <div className="text-center py-12 space-y-3">
+                    <p className="text-slate-400">No OCR extraction performed yet.</p>
+                    <button
+                      onClick={handleRunNvidiaOcrProcess}
+                      disabled={isProcessingNvidiaOcr}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-bold uppercase tracking-wider inline-flex items-center gap-2 cursor-pointer shadow-md"
+                    >
+                      {isProcessingNvidiaOcr ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                      Run OCR Extraction Now
+                    </button>
                   </div>
+                ) : (
+                  <div className="space-y-3">
+                    {nvidiaOcrBlocks.length > 0 && (
+                      <div className="p-3 bg-slate-950 text-emerald-400 rounded-lg border border-slate-800 space-y-1.5">
+                        <div className="text-[10px] font-bold uppercase text-slate-500 tracking-wider mb-2">Line-by-Line Raw Extracted Output:</div>
+                        {nvidiaOcrBlocks.map((block: any, idx: number) => (
+                          <div key={`ocr-line-${idx}`} className="flex items-start justify-between gap-2 p-1.5 hover:bg-slate-900 rounded border border-transparent hover:border-emerald-500/30 transition-colors">
+                            <span className="text-slate-500 text-[10px] w-6 select-none">{idx + 1}.</span>
+                            <span className="flex-1 font-semibold text-slate-100">{block.text_content}</span>
+                            {block.confidence && (
+                              <span className="text-[9px] text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded font-bold">
+                                {Math.round(block.confidence * 100)}%
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
 
-                  {rawOcrText && (
-                    <div className="p-3 bg-slate-100 dark:bg-slate-950/60 rounded-lg border border-slate-200 dark:border-slate-800">
-                      <div className="text-[10px] font-bold uppercase text-slate-500 mb-1">Combined Raw Output String:</div>
-                      <pre className="text-[11px] text-slate-700 dark:text-slate-300 whitespace-pre-wrap font-mono leading-relaxed">
-                        {rawOcrText}
-                      </pre>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
+                    {displayRawText && (
+                      <div className="p-3 bg-slate-950 text-emerald-400 rounded-lg border border-slate-800 shadow-inner">
+                        <div className="text-[10px] font-bold uppercase text-slate-500 tracking-wider mb-2">Raw Text / Model Context:</div>
+                        <pre className="text-[11px] text-slate-200 whitespace-pre-wrap font-mono leading-relaxed overflow-x-auto">
+                          {displayRawText}
+                        </pre>
+                      </div>
+                    )}
+
+                    {fieldsState.length > 0 && (
+                      <div className="p-3 bg-slate-950 text-indigo-300 rounded-lg border border-slate-800 shadow-inner">
+                        <div className="text-[10px] font-bold uppercase text-slate-500 tracking-wider mb-2">Structured JSON Data:</div>
+                        <pre className="text-[11px] text-emerald-400 whitespace-pre-wrap font-mono leading-relaxed overflow-x-auto">
+                          {JSON.stringify(
+                            fieldsState.reduce((acc, f) => {
+                              if (f.key) acc[f.key] = f.value;
+                              return acc;
+                            }, {} as Record<string, any>),
+                            null,
+                            2
+                          )}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Footer Action Panel */}
           <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 space-y-3">
