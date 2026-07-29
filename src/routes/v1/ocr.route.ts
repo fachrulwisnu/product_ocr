@@ -66,7 +66,7 @@ router.post(
       const templates = getActiveTemplatesStore();
       for (const tmpl of templates) {
         if (tmpl.keywords && tmpl.keywords.length > 0) {
-          if (tmpl.keywords.every((kw: string) => upperText.includes(kw.trim().toUpperCase()))) {
+          if (tmpl.keywords.some((kw: string) => upperText.includes(kw.trim().toUpperCase()))) {
             detectedTemplate = tmpl.template_name;
             break;
           }

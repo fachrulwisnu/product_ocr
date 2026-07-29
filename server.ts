@@ -7,8 +7,34 @@ import { randomUUID } from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import { invokeNvidiaVlm, convertVlmJsonToFields, HARDCODED_NVIDIA_API_KEY, extractReceiptData } from './src/lib/nvidiaVlm';
 import { predictFieldsFromOCR, runInstantLearningTraining } from './src/lib/extractionEngine';
-import { INITIAL_PROJECTS, INITIAL_RECEIPT_IMAGES, generateReceiptSVG } from './src/data/sampleReceipts';
 import { Project, ReceiptImage, ActivityLog, PlatformMetrics, TrainingJob } from './src/types';
+
+const DEFAULT_PROJECTS: Project[] = [
+  {
+    id: 'a0000000-0000-4000-a000-000000000001',
+    name: 'ATM Receipt OCR - Diebold & NCR Fleet',
+    description: 'Production model for automated ATM cash withdrawal, balance inquiry, and cassette audit receipts.',
+    receiptType: 'ATM Cash Withdrawal',
+    createdAt: '2026-07-25T10:00:00Z',
+    trainedSampleCount: 0,
+    modelAccuracy: 94.8,
+    modelStatus: 'trained',
+    modelVersion: 'v1.2.0',
+    updatedAt: '2026-07-27T18:30:00Z'
+  },
+  {
+    id: 'a0000000-0000-4000-a000-000000000002',
+    name: 'Cassette Audit & Cleared Reports',
+    description: 'Extraction model for ATM cassette cash balances, remaining bills, and card capture logs.',
+    receiptType: 'Cassette Audit & Cleared',
+    createdAt: '2026-07-26T14:15:00Z',
+    trainedSampleCount: 0,
+    modelAccuracy: 81.2,
+    modelStatus: 'untrained',
+    modelVersion: 'v1.0.0',
+    updatedAt: '2026-07-27T19:10:00Z'
+  }
+];
 import { apiRateLimiter } from './src/middleware/rateLimiter';
 import { errorHandler } from './src/middleware/errorHandler';
 import projectsV1Router from './src/routes/v1/projects.route';
@@ -36,9 +62,9 @@ app.use('/api/v1/ocr', ocrV1Router);
 app.use('/api/v1/templates', templatesV1Router);
 app.use('/api/v1/annotations', annotationsV1Router);
 
-// In-Memory Data Store (Initialized with pre-loaded ATM receipts)
-let projectsStore: Project[] = [...INITIAL_PROJECTS];
-let imagesStore: ReceiptImage[] = [...INITIAL_RECEIPT_IMAGES];
+// In-Memory Data Store
+let projectsStore: Project[] = [...DEFAULT_PROJECTS];
+let imagesStore: ReceiptImage[] = [];
 let trainingJobsStore: TrainingJob[] = [];
 let activityLogsStore: ActivityLog[] = [
   {
@@ -278,8 +304,11 @@ app.post('/api/upload', async (req, res) => {
       return res.status(404).json({ error: 'Project not found' });
     }
 
-    // Default image if missing or custom upload
-    const imageContent = imageData || generateReceiptSVG('FIRST NATIONAL BANK', receiptType || 'CASH WITHDRAWAL', 'ATM-9102-LA', '$100.00', '$2,150.00', '5', '0');
+    if (!imageData) {
+      return res.status(400).json({ error: 'imageData is required for document upload' });
+    }
+
+    const imageContent = imageData;
 
     const docCategory = receiptType || proj.receiptType || 'ATM Cash Withdrawal';
     const chosenModel = modelId || 'meta/llama-3.2-90b-vision-instruct';

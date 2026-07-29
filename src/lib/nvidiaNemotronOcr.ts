@@ -105,67 +105,19 @@ export async function processNvidiaNemotronOcr(
       });
     }
 
-    if (blocks.length > 0) {
-      return {
-        raw_text: fullTextLines.join('\n'),
-        raw_json_response: rawData,
-        blocks,
-        processing_time_ms: processingTimeMs
-      };
-    }
-
-    // Fallback: Generate structured bounding boxes if raw detection array was empty
-    return generateStructuredOcrFallback(cleanBase64, fileName, startTime);
+    return {
+      raw_text: fullTextLines.join('\n'),
+      raw_json_response: rawData,
+      blocks,
+      processing_time_ms: processingTimeMs
+    };
   } catch (err: any) {
-    console.warn(`[NVIDIA Nemotron OCR API Notice] (${err?.message}). Utilizing high-precision OCR extraction pipeline.`);
-    return generateStructuredOcrFallback(cleanBase64, fileName, startTime);
+    console.error(`[NVIDIA Nemotron OCR API Error] (${err?.message})`);
+    return {
+      raw_text: '',
+      raw_json_response: { error: err?.message || 'OCR processing failed' },
+      blocks: [],
+      processing_time_ms: Date.now() - startTime
+    };
   }
-}
-
-/**
- * Precision fallback OCR block generator for ATM receipt structures
- */
-function generateStructuredOcrFallback(
-  base64Image: string,
-  fileName: string,
-  startTime: number
-): OcrProcessResult {
-  const processingTimeMs = Date.now() - startTime + 380;
-
-  const mockLines = [
-    { text: "FIRST NATIONAL BANK", confidence: 0.99, x: 15, y: 8, w: 70, h: 6 },
-    { text: "ATM LOCATION: #4402 - DOWNTOWN BOS", confidence: 0.98, x: 10, y: 16, w: 80, h: 5 },
-    { text: "DATE: 2026-07-28  TIME: 14:32:05", confidence: 0.97, x: 12, y: 23, w: 76, h: 5 },
-    { text: "CARD NUMBER: ************4821", confidence: 0.96, x: 12, y: 30, w: 76, h: 5 },
-    { text: "SEQUENCE NO: 884129  AUTH: 90214", confidence: 0.95, x: 10, y: 37, w: 80, h: 5 },
-    { text: "TRANSACTION: CASH WITHDRAWAL", confidence: 0.99, x: 10, y: 46, w: 80, h: 6 },
-    { text: "AMOUNT: $300.00", confidence: 0.99, x: 20, y: 54, w: 60, h: 7 },
-    { text: "TERMINAL FEE: $2.50", confidence: 0.94, x: 20, y: 63, w: 60, h: 5 },
-    { text: "AVAILABLE BALANCE: $3,210.00", confidence: 0.98, x: 10, y: 71, w: 80, h: 6 },
-    { text: "THANK YOU FOR BANKING WITH US!", confidence: 0.99, x: 8, y: 82, w: 84, h: 6 },
-    { text: "www.firstnationalbank.com", confidence: 0.93, x: 18, y: 90, w: 64, h: 4 }
-  ];
-
-  const blocks: OcrDetectedBlock[] = mockLines.map(line => ({
-    text_content: line.text,
-    confidence: line.confidence,
-    box_x: line.x,
-    box_y: line.y,
-    box_width: line.w,
-    box_height: line.h
-  }));
-
-  const raw_text = blocks.map(b => b.text_content).join('\n');
-
-  return {
-    raw_text,
-    raw_json_response: {
-      status: "SUCCESS",
-      engine: "nvidia/nemotron-ocr-v2",
-      detections_count: blocks.length,
-      model_confidence_avg: 0.97
-    },
-    blocks,
-    processing_time_ms: processingTimeMs
-  };
 }

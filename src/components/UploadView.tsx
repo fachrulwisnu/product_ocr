@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import axios from 'axios';
 import { Project, ReceiptType } from '../types';
-import { generateReceiptSVG } from '../data/sampleReceipts';
 import { compressImageForVlm } from '../utils/imageCompressor';
 import { 
   Upload, 
@@ -211,56 +210,6 @@ export const UploadView: React.FC<UploadViewProps> = ({
     disabled: !selectedType || isProcessing
   } as any);
 
-  // Handle Preset Simulation
-  const handleSimulatePresetSample = async (presetType: ReceiptType, atmId: string, amount: string, balance: string) => {
-    if (!activeProject) return;
-
-    const actualCategory = selectedType || presetType;
-    if (!selectedType) {
-      setSelectedType(presetType);
-    }
-
-    setIsProcessing(true);
-
-    const imageData = generateReceiptSVG(
-      'FIRST NATIONAL BANK',
-      presetType,
-      atmId,
-      amount,
-      balance,
-      '8',
-      '2'
-    );
-
-    try {
-      const response = await fetch('/api/upload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          projectId: activeProject.id,
-          fileName: `Preset_${presetType.replace(/\s+/g, '_')}_${Date.now().toString().slice(-4)}.png`,
-          receiptType: actualCategory,
-          imageData,
-          modelId: selectedModel
-        })
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setProgress(100);
-        setStatusMessage("Finalizing structured JSON output...");
-        await new Promise(r => setTimeout(r, 400));
-        onUploadSuccess(data);
-      }
-    } catch (err) {
-      console.error('Preset upload error:', err);
-    } finally {
-      setIsProcessing(false);
-      setProgress(0);
-      setStatusMessage('');
-    }
-  };
-
   // Delete image from Supabase storage & database
   const handleDeleteImage = async (imageId: string) => {
     setIsDeletingId(imageId);
@@ -302,6 +251,12 @@ export const UploadView: React.FC<UploadViewProps> = ({
             onChange={(e) => setSelectedModel(e.target.value)}
             className="text-xs font-bold px-3 py-2 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
           >
+            <option value="gemini-1.5-flash">
+              Gemini 1.5 Flash - Fast, Cost-Effective Multimodal
+            </option>
+            <option value="gemini-1.5-pro">
+              Gemini 1.5 Pro - High Reasoning & Complex Documents
+            </option>
             <option value="nvidia/nemotron-3-ultra-550b-a55b">
               Nemotron 3 Ultra 550B - Advanced Reasoning & Invoices
             </option>
@@ -511,74 +466,7 @@ export const UploadView: React.FC<UploadViewProps> = ({
         </div>
       )}
 
-      {/* Preset ATM Receipt Quick Sample Ingestor */}
-      <div className={`p-5 rounded-xl border ${
-        isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
-      } space-y-4`}>
-        <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
-          <div className="flex items-center gap-2">
-            <Zap className="w-4 h-4 text-indigo-500" />
-            <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Pre-Loaded Synthetic ATM Receipts</h3>
-          </div>
-          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Instant OCR Ingestion</span>
-        </div>
 
-        <p className="text-xs text-slate-500">
-          Click any preset receipt below to immediately test NVIDIA NIM OCR API bounding box detection and extraction without uploading your own file:
-        </p>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          
-          <button
-            onClick={() => handleSimulatePresetSample('ATM Cash Withdrawal', 'ATM-7740-BOS', '$300.00', '$3,210.00')}
-            disabled={isProcessing}
-            className="p-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 hover:border-indigo-500 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/30 text-left transition-all cursor-pointer group space-y-1"
-          >
-            <div className="flex items-center justify-between">
-              <span className="font-bold text-xs group-hover:text-indigo-600 uppercase tracking-wider">Withdrawal $300</span>
-              <ImageIcon className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-500" />
-            </div>
-            <p className="text-[10px] font-mono text-slate-500">ATM-7740-BOS • Diebold</p>
-          </button>
-
-          <button
-            onClick={() => handleSimulatePresetSample('Balance Inquiry', 'ATM-1102-MIA', '$0.00', '$12,450.00')}
-            disabled={isProcessing}
-            className="p-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 hover:border-indigo-500 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/30 text-left transition-all cursor-pointer group space-y-1"
-          >
-            <div className="flex items-center justify-between">
-              <span className="font-bold text-xs group-hover:text-indigo-600 uppercase tracking-wider">Balance Inquiry</span>
-              <ImageIcon className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-500" />
-            </div>
-            <p className="text-[10px] font-mono text-slate-500">ATM-1102-MIA • NCR</p>
-          </button>
-
-          <button
-            onClick={() => handleSimulatePresetSample('Cash Deposit', 'ATM-5510-DAL', '$500.00', '$8,920.00')}
-            disabled={isProcessing}
-            className="p-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 hover:border-indigo-500 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/30 text-left transition-all cursor-pointer group space-y-1"
-          >
-            <div className="flex items-center justify-between">
-              <span className="font-bold text-xs group-hover:text-indigo-600 uppercase tracking-wider">Deposit $500</span>
-              <ImageIcon className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-500" />
-            </div>
-            <p className="text-[10px] font-mono text-slate-500">ATM-5510-DAL • Wincor</p>
-          </button>
-
-          <button
-            onClick={() => handleSimulatePresetSample('Cassette Audit & Cleared', 'ATM-9900-SEA', '$0.00', '$0.00')}
-            disabled={isProcessing}
-            className="p-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 hover:border-indigo-500 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/30 text-left transition-all cursor-pointer group space-y-1"
-          >
-            <div className="flex items-center justify-between">
-              <span className="font-bold text-xs group-hover:text-indigo-600 uppercase tracking-wider">Cassette Audit</span>
-              <ImageIcon className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-500" />
-            </div>
-            <p className="text-[10px] font-mono text-slate-500">ATM-9900-SEA • Hyosung</p>
-          </button>
-
-        </div>
-      </div>
 
       {/* Full Image Preview Modal */}
       {previewImage && (

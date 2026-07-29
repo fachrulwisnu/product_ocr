@@ -97,84 +97,46 @@ export async function extractReceiptData(
   const systemPrompt = `You are an expert document data extraction engine. STRICT SCHEMA RULE: ${schemaRule}. Return ONLY raw JSON without markdown formatting.`;
 
   // ====================================================================================
-  // ROUTE A: NEMOTRON OCR v2 (Already Stable)
+  // ROUTE A: NEMOTRON OCR v2 + HYBRID JSON FORMATTER
   // ====================================================================================
   if (modelId.includes('nemotron-ocr-v2') || modelId.includes('nemotron-nano-ocr-v2')) {
-    const rawText = await extractRawTextWithOcr(fullDataUrl);
-    const extractedTextLines = rawText.split('\n').filter(line => line.trim().length > 0);
-    const combinedRawText = rawText.toUpperCase();
-    let dbTemplates: any[] = [];
+    // 1. Extract raw text from the image
+    const rawTextContext = await extractRawTextWithOcr(fullDataUrl);
 
-    if (isSupabaseConfigured()) {
-      try {
-        const { data } = await supabase.from('receipt_templates_ocr').select('*');
-        if (data && data.length > 0) {
-          dbTemplates = data;
-        }
-      } catch (err) {
-        console.warn("Supabase receipt_templates_ocr fetch error:", err);
-      }
+    // 2. Format the raw text into structured JSON using a fast LLM (Llama 3.1 70B)
+    const chatUrl = "https://integrate.api.nvidia.com/v1/chat/completions";
+    const chatHeaders = {
+      "Authorization": "Bearer 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", // Using Chat API Key
+      "Accept": "application/json",
+      "Content-Type": "application/json"
+    };
+
+    const payload = {
+      model: "meta/llama-3.1-70b-instruct",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: `Format the following raw OCR text into a strict JSON object based on the schema rule. Do not invent data.\n\nRAW OCR TEXT:\n${rawTextContext}` }
+      ],
+      temperature: 0.1,
+      max_tokens: 2048,
+      stream: false
+    };
+
+    try {
+      const response = await axios.post(chatUrl, payload, { headers: chatHeaders, timeout: 60000 });
+      const structuredText = response.data.choices[0]?.message?.content || "{}";
+      return JSON.parse(structuredText.replace(/```json/g, '').replace(/```/g, '').trim());
+    } catch (error: any) {
+      console.error("Hybrid Formatter Error:", error.response?.data || error.message);
+      // Fallback: return as JSON if LLM formatting fails, so frontend doesn't use mock data
+      return { raw_text_fallback: rawTextContext }; 
     }
-
-    if (dbTemplates.length === 0) {
-      dbTemplates = DEFAULT_RECEIPT_TEMPLATES;
-    }
-
-    let activeSchemaRule = schemaRule || "Format as a general receipt JSON.";
-    let detectedTemplate = "General Receipt";
-
-    for (const tmpl of dbTemplates) {
-      if (tmpl.keywords && Array.isArray(tmpl.keywords) && tmpl.keywords.length > 0) {
-        const match = tmpl.keywords.every((kw: string) => combinedRawText.includes(kw.trim().toUpperCase()));
-        if (match) {
-          activeSchemaRule = tmpl.schema_rule;
-          detectedTemplate = tmpl.template_name;
-          break;
-        }
-      }
-    }
-
-    if (extractedTextLines.length > 0) {
-      const chatUrl = "https://integrate.api.nvidia.com/v1/chat/completions";
-      const chatHeaders = {
-        "Authorization": "Bearer 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",
-        "Accept": "application/json",
-        "Content-Type": "application/json"
-      };
-
-      const formattingPrompt = `You are an expert OCR data formatter. Format the following raw OCR text lines into a clean JSON object. STRICT SCHEMA RULE: ${activeSchemaRule}. Return ONLY raw JSON without markdown formatting. Include a key "auto_detected_template": "${detectedTemplate}".`;
-
-      const formatPayload = {
-        model: "meta/llama-3.1-70b-instruct",
-        messages: [
-          { role: "system", content: formattingPrompt },
-          { role: "user", content: extractedTextLines.join('\n') }
-        ],
-        temperature: 0.1,
-        max_tokens: 2048,
-        stream: false
-      };
-
-      try {
-        const formatResponse = await axios.post(chatUrl, formatPayload, { headers: chatHeaders, timeout: 30000 });
-        const structuredText = formatResponse.data.choices[0]?.message?.content || "{}";
-        const parsed = JSON.parse(structuredText.replace(/```json/g, '').replace(/```/g, '').trim());
-        if (typeof parsed === 'object' && parsed !== null) {
-          parsed.auto_detected_template = detectedTemplate;
-        }
-        return parsed;
-      } catch (formatErr) {
-        console.warn("Llama 3.1 70B formatting fallback:", formatErr);
-      }
-    }
-
-    return { extracted_raw_text: rawText, auto_detected_template: detectedTemplate }; 
   }
 
   // ====================================================================================
   // ROUTE B: TEXT-ONLY REASONING MODELS (Ultra 550B, Llama 3.1 70B, etc.)
   // ====================================================================================
-  else if (modelId.includes('ultra') || !modelId.includes('vision')) {
+  else if ((modelId.includes('ultra') || !modelId.includes('vision')) && !modelId.toLowerCase().includes('gemini')) {
     // 1. Because these models crash with images, we MUST run OCR first.
     const rawTextContext = await extractRawTextWithOcr(fullDataUrl);
 
@@ -210,7 +172,7 @@ export async function extractReceiptData(
   // ====================================================================================
   // ROUTE C: VISION LLMs (Llama 3.2 90B Vision)
   // ====================================================================================
-  else {
+  else if (!modelId.toLowerCase().includes('gemini')) {
     const chatUrl = "https://integrate.api.nvidia.com/v1/chat/completions";
     const chatHeaders = {
       "Authorization": "Bearer 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",
@@ -241,6 +203,51 @@ export async function extractReceiptData(
       return JSON.parse(extractedText.replace(/```json/g, '').replace(/```/g, '').trim());
     } catch (error: any) {
       throw new Error(`Vision LLM Error: ${JSON.stringify(error.response?.data) || error.message}`);
+    }
+  }
+
+  // ====================================================================================
+  // ROUTE D: GOOGLE GEMINI MODELS (Gemini 1.5 Pro / Flash via Axios)
+  // ====================================================================================
+  else if (modelId.toLowerCase().includes('gemini')) {
+    // NOTE: Make sure to define GEMINI_API_KEY in your backend .env file
+    const geminiApiKey = process.env.GEMINI_API_KEY || "INSERT_YOUR_GEMINI_KEY_HERE_TEMPORARILY"; 
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${geminiApiKey}`;
+
+    // Gemini requires a specific payload structure different from OpenAI/NVIDIA
+    const payload = {
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { text: systemPrompt },
+            { 
+              inline_data: { 
+                mime_type: "image/jpeg", 
+                data: base64DataOnly 
+              } 
+            }
+          ]
+        }
+      ],
+      generationConfig: {
+        temperature: 0.1,
+        // Force Gemini to always return a valid JSON object
+        responseMimeType: "application/json"
+      }
+    };
+
+    try {
+      const response = await axios.post(geminiUrl, payload, { 
+        headers: { "Content-Type": "application/json" }, 
+        timeout: 90000 
+      });
+      
+      const extractedText = response.data.candidates[0]?.content?.parts[0]?.text || "{}";
+      return JSON.parse(extractedText);
+    } catch (error: any) {
+      console.error(`Gemini API Error (${modelId}):`, error.response?.data || error.message);
+      throw new Error(`Google Gemini Error: ${JSON.stringify(error.response?.data?.error?.message) || error.message}`);
     }
   }
 }
@@ -374,23 +381,7 @@ export async function invokeNvidiaVlm(
  * Default fallback extraction for ATM Receipts when API is offline or in trial mode
  */
 export function generateFallbackVlmExtraction(): Record<string, any> {
-  return {
-    "ATM_LOCATION": "FIRST NATIONAL BANK - DOWNTOWN BRANCH #4829",
-    "TERMINAL_ID": "ATM-8842-NY",
-    "TRANSACTION_DATE": "2026-07-27",
-    "TRANSACTION_TIME": "14:32:08",
-    "RECORD_NUMBER": "0094182",
-    "CARD_NUMBER": "************4819",
-    "TRANSACTION_TYPE": "CASH WITHDRAWAL",
-    "ACCOUNT_TYPE": "CHECKING ***8821",
-    "WITHDRAWAL_AMOUNT": "$200.00",
-    "SURCHARGE_FEE": "$2.50",
-    "TOTAL_DEBIT": "$202.50",
-    "AVAILABLE_BALANCE": "$1,482.10",
-    "CASSETTE_1_DISPENSED": "10",
-    "CASSETTE_2_DISPENSED": "0",
-    "AUTHORIZATION_CODE": "981240"
-  };
+  return {};
 }
 
 /**
