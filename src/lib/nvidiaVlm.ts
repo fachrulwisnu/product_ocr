@@ -210,8 +210,14 @@ export async function extractReceiptData(
   // ROUTE D: GOOGLE GEMINI MODELS (Gemini 1.5 Pro / Flash via Axios)
   // ====================================================================================
   else if (modelId.toLowerCase().includes('gemini')) {
-    // NOTE: Make sure to define GEMINI_API_KEY in your backend .env file
-    const geminiApiKey = process.env.GEMINI_API_KEY || "INSERT_YOUR_GEMINI_KEY_HERE_TEMPORARILY"; 
+    // 1. Strictly load the key from the environment variable
+    const geminiApiKey = process.env.GEMINI_API_KEY; 
+
+    // 2. Validate existence to prevent sending malformed requests to Google
+    if (!geminiApiKey) {
+      throw new Error("GEMINI_API_KEY is missing! Please ensure it is set in the backend .env file and the server has been restarted.");
+    }
+
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${geminiApiKey}`;
 
     // Gemini requires a specific payload structure different from OpenAI/NVIDIA
