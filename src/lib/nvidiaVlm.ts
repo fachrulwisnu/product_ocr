@@ -4,7 +4,7 @@
  */
 
 import axios from 'axios';
-import { GOLDEN_TEMPLATES } from './goldenTemplates';
+import { GOLDEN_TEMPLATES, getGoldenTemplatesPrompt } from './goldenTemplates';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { DEFAULT_RECEIPT_TEMPLATES } from './defaultTemplates';
 

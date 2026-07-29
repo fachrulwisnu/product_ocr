@@ -39,7 +39,54 @@ export const GOLDEN_TEMPLATES: Record<string, string> = {
   
   "Cassette Audit - OCBC": "Format as JSON. Root matrix keys: TYPE_1, TYPE_2, TYPE_3, TYPE_4. Each type contains sub-keys: CASSETTE, REJECTED, REMAINING, DISPENSED, TOTAL. Include global footer key: CLEARED_TIMESTAMP.",
 
-  "Cassette Audit - BCA": "Format as JSON. Root keys: TYPE_1, TYPE_2, TYPE_3, TYPE_4. Each type contains sub-keys: CASSETTE, REJECTED, REMAINING, DISPENSED, TOTAL. Include global keys: TOTAL_DISPENSED, TOTAL_REMAINING."
+  "Cassette Audit - BCA": "Format as JSON. Root keys: TYPE_1, TYPE_2, TYPE_3, TYPE_4. Each type contains sub-keys: CASSETTE, REJECTED, REMAINING, DISPENSED, TOTAL. Include global keys: TOTAL_DISPENSED, TOTAL_REMAINING.",
+
+  "KTP_INDONESIA": `
+    You are a precise data extraction AI for Indonesian ID Cards (KTP - Kartu Tanda Penduduk).
+    Extract the specific fields requested. Pay close attention to the top header for the city/regency.
+
+    STRICT JSON SCHEMA:
+    {
+      "success": true,
+      "documentType": "KTP",
+      "nik": "String (16 digits)",
+      "nama": "String (Full name)",
+      "kotaAsal": "String (Extract the 'KOTA' or 'KABUPATEN' name located exactly below the PROVINSI at the very top of the card. E.g., 'KABUPATEN KEPULAUAN ANAMBAS')",
+      "provinsi": "String (Topmost line, e.g., 'PROVINSI KEPULAUAN RIAU')",
+      "tempatLahir": "String (City of birth, located before the comma in 'Tempat/Tgl Lahir')",
+      "tanggalLahir": "String (Format: DD-MM-YYYY, located after the comma in 'Tempat/Tgl Lahir')",
+      "jenisKelamin": "String (LAKI-LAKI or PEREMPUAN)",
+      "alamatLengkap": "String (Combine Alamat, RT/RW, Kel/Desa, and Kecamatan into one string)"
+    }
+
+    RULES:
+    - If a field is illegible, return null.
+    - Do NOT output markdown wrappers (like \`\`\`json). Return raw valid JSON only.
+  `,
+
+  "SIM_INDONESIA": `
+    You are a precise data extraction AI for Indonesian Driver's Licenses (SIM - Surat Izin Mengemudi).
+    Extract the specific fields requested. Pay close attention to the stamps and regions for the issuing city.
+
+    STRICT JSON SCHEMA:
+    {
+      "success": true,
+      "documentType": "SIM",
+      "jenisSim": "String (Look for the large letter at the top right, e.g., 'A', 'C', or 'B1')",
+      "noSim": "String (Usually numbers with dashes, e.g., '1205-9202-58035' or listed under 'No. SIM')",
+      "nama": "String (Full name)",
+      "kotaAsalPenerbit": "String (The city where the SIM was issued. Look for the city name directly above the issue date at the bottom, e.g., 'JAKARTA', or the regional police name like 'METRO JAYA')",
+      "tempatLahir": "String (City of birth, located before the comma in the birth date line, e.g., 'KUNINGAN')",
+      "tanggalLahir": "String (Located after the comma in the birth date line)",
+      "pekerjaan": "String (E.g., 'POLWAN', 'PENELITI')",
+      "alamatLengkap": "String (Combine the full address lines)"
+    }
+
+    RULES:
+    - Pay attention to older SIM formats (blue/white background) and newer Smart SIM formats (red/white header).
+    - If a field is illegible, return null.
+    - Do NOT output markdown wrappers (like \`\`\`json). Return raw valid JSON only.
+  `
 };
 
 /**
