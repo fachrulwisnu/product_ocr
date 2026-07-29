@@ -207,20 +207,33 @@ export async function extractReceiptData(
   }
 
   // ====================================================================================
-  // ROUTE D: GOOGLE GEMINI MODELS (Gemini 1.5 Pro / Flash via Axios)
+  // ROUTE D: GOOGLE GEMINI MODELS (Gemini 3.1 Pro / 3.6 Flash via Axios)
   // ====================================================================================
   else if (modelId.toLowerCase().includes('gemini')) {
-    // 1. Strictly load the key from the environment variable
+    // 1. Strictly load the key from the environment variable (.env)
     const geminiApiKey = process.env.GEMINI_API_KEY; 
 
-    // 2. Validate existence to prevent sending malformed requests to Google
     if (!geminiApiKey) {
       throw new Error("GEMINI_API_KEY is missing! Please ensure it is set in the backend .env file and the server has been restarted.");
     }
 
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${geminiApiKey}`;
+    // 2. Sanitize modelId (Remove 'google/' prefixes)
+    let cleanModelId = modelId.split('/').pop() || modelId;
 
-    // Gemini requires a specific payload structure different from OpenAI/NVIDIA
+    // 3. Auto-upgrade to the latest 3.x models based on the model family
+    if (cleanModelId.includes('pro')) {
+      cleanModelId = 'gemini-3.1-pro-preview';
+    } else if (cleanModelId.includes('flash')) {
+      cleanModelId = 'gemini-3.6-flash';
+    } else {
+      // Fallback if neither 'pro' nor 'flash' is specified
+      cleanModelId = 'gemini-3.6-flash'; 
+    }
+
+    // 4. Construct the clean URL for Gemini API
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModelId}:generateContent`;
+
+    // 5. Payload structure matching Google's multimodal requirements
     const payload = {
       contents: [
         {
@@ -238,21 +251,24 @@ export async function extractReceiptData(
       ],
       generationConfig: {
         temperature: 0.1,
-        // Force Gemini to always return a valid JSON object
         responseMimeType: "application/json"
       }
     };
 
     try {
+      // 6. Pass the API Key securely via the x-goog-api-key header
       const response = await axios.post(geminiUrl, payload, { 
-        headers: { "Content-Type": "application/json" }, 
+        headers: { 
+          "Content-Type": "application/json",
+          "x-goog-api-key": geminiApiKey 
+        }, 
         timeout: 90000 
       });
       
       const extractedText = response.data.candidates[0]?.content?.parts[0]?.text || "{}";
       return JSON.parse(extractedText);
     } catch (error: any) {
-      console.error(`Gemini API Error (${modelId}):`, error.response?.data || error.message);
+      console.error(`Gemini API Error (${cleanModelId}):`, error.response?.data || error.message);
       throw new Error(`Google Gemini Error: ${JSON.stringify(error.response?.data?.error?.message) || error.message}`);
     }
   }

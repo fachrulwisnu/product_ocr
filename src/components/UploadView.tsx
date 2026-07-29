@@ -251,11 +251,11 @@ export const UploadView: React.FC<UploadViewProps> = ({
             onChange={(e) => setSelectedModel(e.target.value)}
             className="text-xs font-bold px-3 py-2 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
           >
-            <option value="gemini-1.5-flash">
-              Gemini 1.5 Flash - Fast, Cost-Effective Multimodal
+            <option value="gemini-3.6-flash">
+              Google Gemini 3.6 Flash
             </option>
-            <option value="gemini-1.5-pro">
-              Gemini 1.5 Pro - High Reasoning & Complex Documents
+            <option value="gemini-3.1-pro-preview">
+              Google Gemini 3.1 Pro (Preview)
             </option>
             <option value="nvidia/nemotron-3-ultra-550b-a55b">
               Nemotron 3 Ultra 550B - Advanced Reasoning & Invoices
